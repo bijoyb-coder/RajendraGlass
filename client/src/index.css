@@ -1,0 +1,150 @@
+@import "tailwindcss";
+
+/* Class-based dark mode: toggled by lib/theme.tsx adding/removing `dark` on <html>,
+   rather than Tailwind's default (prefers-color-scheme) media strategy, so the
+   in-app Sun/Moon switch can override the OS setting. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+
+  --color-brand-950: #05131f;
+  --color-brand-900: #071c2e;
+  --color-brand-800: #0b2942;
+  --color-brand-700: #103a5c;
+  --color-brand-600: #164e78;
+  --color-brand-500: #1d6699;
+  --color-brand-400: #2f8ab8;
+  --color-brand-300: #6fb6d6;
+  --color-brand-200: #b3dced;
+  --color-brand-100: #e2f3f9;
+
+  --color-gold-600: #a97a1f;
+  --color-gold-500: #c99633;
+  --color-gold-400: #e0b45a;
+  --color-gold-300: #f0d18f;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- Login screen animations ---------- */
+
+@keyframes drift-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes glass-shine {
+  0% { transform: translateX(-120%) skewX(-20deg); }
+  60%, 100% { transform: translateX(220%) skewX(-20deg); }
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes door-open-left {
+  0%, 20% { transform: rotateY(0deg); }
+  50%, 80% { transform: rotateY(-58deg); }
+  100% { transform: rotateY(0deg); }
+}
+
+@keyframes door-open-right {
+  0%, 20% { transform: rotateY(0deg); }
+  50%, 80% { transform: rotateY(58deg); }
+  100% { transform: rotateY(0deg); }
+}
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.9; }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes sidebar-in {
+  from { transform: translateX(-16px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-drift-up { animation: drift-up 0.7s cubic-bezier(0.16, 1, 0.3, 1) both; }
+.animate-glass-shine { animation: glass-shine 4.5s ease-in-out infinite; }
+.animate-float-slow { animation: float-slow 6s ease-in-out infinite; }
+.animate-door-left { animation: door-open-left 7s ease-in-out infinite; transform-origin: left center; }
+.animate-door-right { animation: door-open-right 7s ease-in-out infinite; transform-origin: right center; }
+.animate-twinkle { animation: twinkle 3s ease-in-out infinite; }
+.animate-fade-in { animation: fade-in 0.5s ease both; }
+.animate-sidebar-in { animation: sidebar-in 0.35s ease both; }
+
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 999px; }
+
+@media print {
+  .no-print { display: none !important; }
+  body { background: white; }
+}
+
+/* ---------- Dark theme retrofit ---------------------------------------------------
+   Every screen in the app (dashboard, masters, sales, inventory, etc. — ~46 files)
+   was built against one consistent light palette: white cards, a slate-50 page
+   background, and slate-{300..800} for text/borders/dividers. Rather than hand-adding
+   a `dark:` variant to every one of those utility classes across every screen, this
+   block retargets that same small set of class *names* wherever `.dark` is an
+   ancestor (see the @custom-variant above / lib/theme.tsx for how `.dark` gets set on
+   <html>) so the whole app gets a consistent, real dark theme from one place. New
+   screens should still prefer explicit `dark:` classes; this is a blanket safety net
+   for the existing ones. The brand-navy sidebar/login screen are unaffected — they're
+   already dark by design in both themes. */
+
+.dark { color-scheme: dark; }
+
+.dark body { background-color: #020617; }
+
+/* Page background */
+.dark .bg-slate-50 { background-color: #020617; }
+.dark .bg-slate-100 { background-color: #1e293b; }
+.dark .hover\:bg-slate-50:hover { background-color: #1e293b; }
+.dark .hover\:bg-slate-100:hover { background-color: #334155; }
+
+/* Card / panel / topbar surfaces */
+.dark .bg-white { background-color: #0f172a; }
+.dark .hover\:bg-white:hover { background-color: #1e293b; }
+
+/* Borders & dividers */
+.dark .border-slate-100 { border-color: #1e293b; }
+.dark .border-slate-200 { border-color: #1e293b; }
+.dark .border-slate-300 { border-color: #334155; }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #1e293b; }
+.dark .ring-slate-200 { --tw-ring-color: #334155; }
+
+/* Text hierarchy */
+.dark .text-slate-800 { color: #e2e8f0; }
+.dark .text-slate-700 { color: #cbd5e1; }
+.dark .text-slate-600 { color: #94a3b8; }
+.dark .text-slate-500 { color: #94a3b8; }
+.dark .text-slate-400 { color: #64748b; }
+.dark .text-slate-300 { color: #475569; }
+.dark .hover\:text-slate-500:hover { color: #cbd5e1; }
+.dark .hover\:text-slate-700:hover { color: #f1f5f9; }
+
+/* Form controls that don't set an explicit bg (native white background otherwise) */
+.dark input, .dark select, .dark textarea { background-color: #0f172a; color: #e2e8f0; }
+.dark input::placeholder, .dark textarea::placeholder { color: #64748b; }
+
+/* Status/alert tints (bg-{color}-50 + text-{color}-700 pattern used for badges/banners) */
+.dark .bg-red-50 { background-color: rgba(127, 29, 29, 0.35); }
+.dark .bg-amber-50 { background-color: rgba(120, 53, 15, 0.35); }
+.dark .bg-emerald-50 { background-color: rgba(6, 78, 59, 0.35); }
+.dark .bg-blue-50 { background-color: rgba(30, 58, 138, 0.35); }
+.dark .bg-green-50 { background-color: rgba(6, 78, 59, 0.35); }
