@@ -1,5 +1,7 @@
 # Rajendra Glass Centre — Inventory Management System
 
+[![CI](https://github.com/bijoyb-coder/RajendraGlass/actions/workflows/ci.yml/badge.svg)](https://github.com/bijoyb-coder/RajendraGlass/actions/workflows/ci.yml)
+
 Stack per the SDD/API Specification: **React (Vite + TS + Tailwind) · ASP.NET Core Web API (Dapper) · SQL Server**.
 
 ## What's included
