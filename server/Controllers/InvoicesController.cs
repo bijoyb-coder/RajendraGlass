@@ -53,7 +53,12 @@ public class InvoicesController(IDbConnectionFactory db, IEInvoiceGateway eInvoi
                      c.BillingAddress AS CustomerAddress, i.InvoiceDate, i.PlaceOfSupply, i.CustomerOrderRef, i.TransporterId,
                      t.Name AS TransporterName, i.VehicleNo, i.Destination, i.BasicValue, i.DiscountValue, i.TaxableValue,
                      i.CgstValue, i.SgstValue, i.IgstValue, i.RoundOff, i.TotalValue, i.Status, i.EwayBillNo, i.Remarks,
-                     i.IrnNo, i.IrnAckNo, i.IrnAckDate, i.IrnQrPayload, i.EInvoiceStatus, i.SalesOrderId, o.OrderNo
+                     i.IrnNo, i.IrnAckNo, i.IrnAckDate, i.IrnQrPayload, i.EInvoiceStatus, i.SalesOrderId, o.OrderNo,
+                     CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM Finance.Voucher v WHERE v.InvoiceId = i.InvoiceId)
+                               AND NOT EXISTS (SELECT 1 FROM Sales.InvoicePayment ip WHERE ip.InvoiceId = i.InvoiceId)
+                               AND NOT EXISTS (SELECT 1 FROM Dispatch.Waybill w WHERE w.InvoiceId = i.InvoiceId)
+                               AND NOT EXISTS (SELECT 1 FROM CRM.Complaint cm WHERE cm.InvoiceId = i.InvoiceId)
+                          THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Sales.Invoice i
               JOIN Master.Customer c ON c.CustomerId = i.CustomerId
               LEFT JOIN Master.Transporter t ON t.TransporterId = i.TransporterId
