@@ -78,7 +78,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             @"SELECT q.QuotationId, q.QuotationNo, q.CustomerId, c.Name AS CustomerName,
                      c.CustomerType, c.BillingAddress AS CustomerAddress, c.Gstin AS CustomerGstin,
                      c.Mobile AS CustomerMobile, c.StateName AS CustomerStateName,
-                     q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue
+                     q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue,
+                     CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM Sales.SalesOrder o WHERE o.QuotationId = q.QuotationId) THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Sales.Quotation q JOIN Master.Customer c ON c.CustomerId = q.CustomerId WHERE q.QuotationId = @id", new { id });
         if (q is null) return NotFound();
         q.Lines = conn.Query<QuotationLineDto>(
