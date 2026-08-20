@@ -323,36 +323,108 @@ public class CreateGrnRequest
     public List<GrnLineDto> Lines { get; set; } = new();
 }
 
+/// <summary>One line entered directly off the supplier's paper tax invoice. Local lines only ever
+/// populate Qty/Rate; Inter-State lines also populate the physical breakdown, which is how Area
+/// (and so BasicValue) gets derived — see PurchaseInvoiceLinePricing.</summary>
+public class PurchaseInvoiceLineDto
+{
+    public int ProductId { get; set; }
+    public string? ProductCode { get; set; }
+    public string? ProductDescription { get; set; }
+    public string? Description { get; set; }
+    // ----- Inter-State only (null for Local lines) -----
+    public decimal? ThicknessMm { get; set; }
+    public decimal? WidthCm { get; set; }
+    public decimal? LengthCm { get; set; }
+    public int? NoOfCrates { get; set; }
+    public int? SheetsPerCrate { get; set; }
+    // ----- common -----
+    public decimal Qty { get; set; }
+    public decimal Area { get; set; }
+    public decimal Rate { get; set; }
+    public decimal BasicValue { get; set; }
+    public decimal GstPct { get; set; } = 18;
+    public decimal TaxableValue { get; set; }
+    public decimal CgstAmount { get; set; }
+    public decimal SgstAmount { get; set; }
+    public decimal IgstAmount { get; set; }
+    public decimal NetValue { get; set; }
+}
+
 public class PurchaseInvoiceDto
 {
     public int PurchaseInvoiceId { get; set; }
     public string? InvoiceNo { get; set; }
-    public int GrnId { get; set; }
-    public string? GrnNo { get; set; }
+    public int SupplierId { get; set; }
     public string? SupplierName { get; set; }
+    /// <summary>Purely an optional cross-reference now — neither is required to book the invoice.</summary>
+    public int? PurchaseOrderId { get; set; }
+    public string? PoNo { get; set; }
+    public int? GrnId { get; set; }
+    public string? GrnNo { get; set; }
+    public int? GodownId { get; set; }
+    public string? GodownName { get; set; }
     public string? SupplierInvoiceNo { get; set; }
     public DateTime InvoiceDate { get; set; }
+    /// <summary>Drives which line layout and tax split (CGST+SGST vs IGST) this invoice uses.</summary>
+    public bool IsInterState { get; set; }
+    public decimal BasicValue { get; set; }
+    /// <summary>Inter-State only — a flat % applied across all lines' BasicValue, same rate the
+    /// paper invoice shows on every line.</summary>
+    public decimal InsuranceValue { get; set; }
+    public decimal TaxableValue { get; set; }
+    public decimal CgstValue { get; set; }
+    public decimal SgstValue { get; set; }
+    public decimal IgstValue { get; set; }
+    public decimal RoundOff { get; set; }
     public decimal TotalValue { get; set; }
     public string Status { get; set; } = "Booked";
-    /// <summary>Nothing references a purchase invoice, so this is always true (no query needed) —
-    /// same as VoucherDto.CanDelete.</summary>
+    /// <summary>Nothing else references a purchase invoice, so this only ever reflects "no query
+    /// needed" true — same as VoucherDto.CanDelete. The one real blocking condition (stock this
+    /// invoice added has since moved on) can only be checked authoritatively at delete time, the
+    /// same caveat GrnDto.CanDelete carries.</summary>
     public bool CanDelete { get; set; } = true;
+    public List<PurchaseInvoiceLineDto> Lines { get; set; } = new();
+}
+
+public class CreatePurchaseInvoiceLineRequest
+{
+    public int ProductId { get; set; }
+    public string? Description { get; set; }
+    // ----- Inter-State only -----
+    public decimal? ThicknessMm { get; set; }
+    public decimal? WidthCm { get; set; }
+    public decimal? LengthCm { get; set; }
+    public int? NoOfCrates { get; set; }
+    public int? SheetsPerCrate { get; set; }
+    // ----- Local only -----
+    public decimal? Qty { get; set; }
+    // ----- common -----
+    public decimal Rate { get; set; }
+    public decimal? GstPct { get; set; }
 }
 
 public class CreatePurchaseInvoiceRequest
 {
-    public int GrnId { get; set; }
+    public int SupplierId { get; set; }
+    public int GodownId { get; set; }
+    public bool IsInterState { get; set; }
+    public int? PurchaseOrderId { get; set; }
+    public int? GrnId { get; set; }
     public string? SupplierInvoiceNo { get; set; }
-    public decimal TotalValue { get; set; }
+    public DateTime? InvoiceDate { get; set; }
+    /// <summary>Inter-State only; ignored for Local invoices.</summary>
+    public decimal? InsurancePct { get; set; }
+    public List<CreatePurchaseInvoiceLineRequest> Lines { get; set; } = new();
 }
 
-/// <summary>Corrects a wrong entry on an already-booked purchase invoice — unlike the GRN and
-/// purchase order it derives from, this document can always be edited.</summary>
+/// <summary>Fixes a wrong supplier reference number or date on an already-booked purchase
+/// invoice — quantities/rates/stock are not editable here (they'd need their own stock
+/// reconciliation); delete and re-enter for anything beyond that.</summary>
 public class UpdatePurchaseInvoiceRequest
 {
     public string? SupplierInvoiceNo { get; set; }
     public DateTime? InvoiceDate { get; set; }
-    public decimal TotalValue { get; set; }
 }
 
 // ---------- Sales: Quotation / Sales Order ----------

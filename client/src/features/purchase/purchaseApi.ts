@@ -57,9 +57,9 @@ export const purchaseApi = api.injectEndpoints({
       query: (id) => `/purchase-invoices/${id}`,
       providesTags: (_r, _e, id) => [{ type: 'PurchaseInvoice', id }],
     }),
-    createPurchaseInvoice: builder.mutation<{ purchaseInvoiceId: number }, CreatePurchaseInvoiceRequest>({
+    createPurchaseInvoice: builder.mutation<{ purchaseInvoiceId: number; invoiceNo: string }, CreatePurchaseInvoiceRequest>({
       query: (body) => ({ url: '/purchase-invoices', method: 'POST', body }),
-      invalidatesTags: ['PurchaseInvoice', 'Grn'],
+      invalidatesTags: ['PurchaseInvoice', 'Grn', 'Stock'],
     }),
     updatePurchaseInvoice: builder.mutation<void, { id: number; body: UpdatePurchaseInvoiceRequest }>({
       query: ({ id, body }) => ({ url: `/purchase-invoices/${id}`, method: 'PUT', body }),
@@ -67,7 +67,7 @@ export const purchaseApi = api.injectEndpoints({
     }),
     deletePurchaseInvoice: builder.mutation<void, number>({
       query: (id) => ({ url: `/purchase-invoices/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['PurchaseInvoice', 'Grn'],
+      invalidatesTags: ['PurchaseInvoice', 'Grn', 'Stock'],
     }),
   }),
 })
