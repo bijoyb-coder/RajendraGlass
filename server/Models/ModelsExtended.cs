@@ -407,7 +407,9 @@ public class CreatePurchaseInvoiceLineRequest
 public class CreatePurchaseInvoiceRequest
 {
     public int SupplierId { get; set; }
-    public int GodownId { get; set; }
+    /// <summary>Optional — defaults to the 'MAIN' godown (same fallback CreateGrnRequest.GodownCode
+    /// already uses) when not supplied.</summary>
+    public int? GodownId { get; set; }
     public bool IsInterState { get; set; }
     public int? PurchaseOrderId { get; set; }
     public int? GrnId { get; set; }

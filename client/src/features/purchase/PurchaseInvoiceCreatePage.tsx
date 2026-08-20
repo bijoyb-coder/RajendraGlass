@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Trash2, Save } from 'lucide-react'
 import { useListProductsQuery } from '../masters/mastersApi'
-import { useListGodownsQuery } from '../inventory/inventoryApi'
 import { useListSuppliersQuery, useListPurchaseOrdersQuery, useListGrnsQuery, useCreatePurchaseInvoiceMutation } from './purchaseApi'
 import type { CreatePurchaseInvoiceLineRequest } from '../../lib/types'
 
@@ -41,14 +40,12 @@ function priceLine(line: LineRow, isInterState: boolean, gstPct: number) {
 export default function PurchaseInvoiceCreatePage() {
   const navigate = useNavigate()
   const { data: suppliers } = useListSuppliersQuery()
-  const { data: godowns } = useListGodownsQuery()
   const { data: purchaseOrders } = useListPurchaseOrdersQuery()
   const { data: grns } = useListGrnsQuery()
   const { data: products } = useListProductsQuery()
   const [createPurchaseInvoice, { isLoading }] = useCreatePurchaseInvoiceMutation()
 
   const [supplierId, setSupplierId] = useState<number | ''>('')
-  const [godownId, setGodownId] = useState<number | ''>('')
   const [purchaseOrderId, setPurchaseOrderId] = useState<number | ''>('')
   const [grnId, setGrnId] = useState<number | ''>('')
   const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('')
@@ -90,7 +87,6 @@ export default function PurchaseInvoiceCreatePage() {
     e.preventDefault()
     setError(null)
     if (!supplierId) { setError('Please select a supplier.'); return }
-    if (!godownId) { setError('Please select a godown to receive the stock into.'); return }
 
     const validLines = lines.filter((l) => l.productId && l.rate > 0 && (isInterState
       ? l.thicknessMm && l.widthCm && l.lengthCm && l.noOfCrates && l.sheetsPerCrate
@@ -100,7 +96,6 @@ export default function PurchaseInvoiceCreatePage() {
     try {
       const result = await createPurchaseInvoice({
         supplierId: Number(supplierId),
-        godownId: Number(godownId),
         isInterState,
         purchaseOrderId: purchaseOrderId ? Number(purchaseOrderId) : undefined,
         grnId: grnId ? Number(grnId) : undefined,
@@ -142,12 +137,6 @@ export default function PurchaseInvoiceCreatePage() {
               <select required value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
                 <option value="">Select supplier…</option>
                 {suppliers?.items.map((s) => <option key={s.supplierId} value={s.supplierId}>{s.name}</option>)}
-              </select>
-            </Field>
-            <Field label="Godown *">
-              <select required value={godownId} onChange={(e) => setGodownId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
-                <option value="">Select godown…</option>
-                {godowns?.items.map((g) => <option key={g.godownId} value={g.godownId}>{g.name}</option>)}
               </select>
             </Field>
             <Field label="Supplier Invoice No.">

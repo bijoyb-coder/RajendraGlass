@@ -348,7 +348,9 @@ export interface CreatePurchaseInvoiceLineRequest {
   rate: number; gstPct?: number
 }
 export interface CreatePurchaseInvoiceRequest {
-  supplierId: number; godownId: number; isInterState: boolean
+  supplierId: number; isInterState: boolean
+  /** Optional — defaults to the 'MAIN' godown server-side when not supplied. */
+  godownId?: number
   purchaseOrderId?: number; grnId?: number
   supplierInvoiceNo?: string; invoiceDate?: string
   /** Inter-State only; ignored for Local invoices. */

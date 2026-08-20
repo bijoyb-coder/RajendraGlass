@@ -400,9 +400,23 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
             if (supplier is null)
                 return UnprocessableEntity(new ProblemResponse { Title = "Supplier required", Status = 422, ErrorCode = "SUPPLIER_REQUIRED", Detail = "Select an active supplier." });
 
-            var godown = conn.QueryFirstOrDefault("SELECT GodownId FROM Company.Godown WHERE GodownId = @GodownId AND IsActive = 1", new { req.GodownId }, tx);
-            if (godown is null)
-                return UnprocessableEntity(new ProblemResponse { Title = "Godown required", Status = 422, ErrorCode = "GODOWN_REQUIRED", Detail = "Select an active godown to receive the stock into." });
+            // Godown isn't something the operator has to pick — same fallback GrnController.Create
+            // already uses: prefer 'MAIN', else any active godown, else GodownId 1 as a last resort.
+            // A caller that does pass one is still checked, so a stale/inactive id is still refused.
+            int godownId;
+            if (req.GodownId.HasValue)
+            {
+                var godown = conn.QueryFirstOrDefault("SELECT GodownId FROM Company.Godown WHERE GodownId = @GodownId AND IsActive = 1", new { req.GodownId }, tx);
+                if (godown is null)
+                    return UnprocessableEntity(new ProblemResponse { Title = "Invalid godown", Status = 422, ErrorCode = "GODOWN_INVALID", Detail = "The selected godown is not active." });
+                godownId = req.GodownId.Value;
+            }
+            else
+            {
+                godownId = conn.QueryFirstOrDefault<int?>(
+                    "SELECT TOP 1 GodownId FROM Company.Godown WHERE IsActive = 1 ORDER BY CASE WHEN Code = 'MAIN' THEN 0 ELSE 1 END",
+                    transaction: tx) ?? 1;
+            }
 
             int branchId = DocNumbering.DefaultBranchId(conn, tx);
             string invoiceNo = DocNumbering.NextNumber(conn, tx, branchId, "PurchaseInvoice");
@@ -416,8 +430,8 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                 @"INSERT INTO Purchase.PurchaseInvoice
                     (InvoiceNo, SupplierId, PurchaseOrderId, GrnId, GodownId, SupplierInvoiceNo, InvoiceDate, IsInterState, Status)
                   OUTPUT INSERTED.PurchaseInvoiceId
-                  VALUES (@invoiceNo, @SupplierId, @PurchaseOrderId, @GrnId, @GodownId, @SupplierInvoiceNo, ISNULL(@InvoiceDate, CAST(SYSUTCDATETIME() AS DATE)), @IsInterState, 'Booked')",
-                new { invoiceNo, req.SupplierId, req.PurchaseOrderId, req.GrnId, req.GodownId, req.SupplierInvoiceNo, req.InvoiceDate, req.IsInterState }, tx);
+                  VALUES (@invoiceNo, @SupplierId, @PurchaseOrderId, @GrnId, @godownId, @SupplierInvoiceNo, ISNULL(@InvoiceDate, CAST(SYSUTCDATETIME() AS DATE)), @IsInterState, 'Booked')",
+                new { invoiceNo, req.SupplierId, req.PurchaseOrderId, req.GrnId, godownId, req.SupplierInvoiceNo, req.InvoiceDate, req.IsInterState }, tx);
 
             decimal basicTotal = 0, taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
             foreach (var l in req.Lines)
@@ -453,17 +467,17 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                     }, tx);
 
                 // Same upsert-then-movement pattern GrnController.Create uses for stock.
-                var balance = conn.QueryFirstOrDefault("SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",
-                    new { l.ProductId, req.GodownId }, tx);
+                var balance = conn.QueryFirstOrDefault("SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @godownId",
+                    new { l.ProductId, godownId }, tx);
                 if (balance is null)
-                    conn.Execute("INSERT INTO Inventory.StockBalance (ProductId, GodownId, QtyOnHand) VALUES (@ProductId, @GodownId, @Area)",
-                        new { l.ProductId, req.GodownId, calc.Area }, tx);
+                    conn.Execute("INSERT INTO Inventory.StockBalance (ProductId, GodownId, QtyOnHand) VALUES (@ProductId, @godownId, @Area)",
+                        new { l.ProductId, godownId, calc.Area }, tx);
                 else
                     conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand + @Area WHERE StockBalanceId = @id",
                         new { calc.Area, id = (int)balance.StockBalanceId }, tx);
 
-                conn.Execute("INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty, Rate) VALUES (@ProductId, @GodownId, 'Purchase', 'PurchaseInvoice', @id, @Area, @Rate)",
-                    new { l.ProductId, req.GodownId, id, calc.Area, l.Rate }, tx);
+                conn.Execute("INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty, Rate) VALUES (@ProductId, @godownId, 'Purchase', 'PurchaseInvoice', @id, @Area, @Rate)",
+                    new { l.ProductId, godownId, id, calc.Area, l.Rate }, tx);
             }
 
             decimal insuranceValue = 0;
