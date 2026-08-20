@@ -30,11 +30,12 @@ export default function QuotationViewPage() {
   }
 
   // Summed from the stored per-line figures, which the server produced with the one
-  // calculation engine — the print can never disagree with the saved quotation.
+  // calculation engine — the print can never disagree with the saved quotation. The Grand Total
+  // itself, though, comes from q.totalValue (already rounded to the nearest rupee server-side),
+  // not this raw line sum — q.roundOff is exactly the gap between the two.
   const basic = q.lines.reduce((s, l) => s + l.basicAmount, 0)
   const discount = q.lines.reduce((s, l) => s + l.discountAmount, 0)
   const gst = q.lines.reduce((s, l) => s + l.gstAmount, 0)
-  const total = q.lines.reduce((s, l) => s + l.amount, 0)
   const anyOverride = q.lines.some((l) => l.isAreaManualOverride || l.isAmountManualOverride)
 
   return (
@@ -155,8 +156,9 @@ export default function QuotationViewPage() {
             <Row label="Basic Amount" value={money(basic)} />
             {discount > 0 && <Row label="Discount" value={`− ${money(discount)}`} />}
             <Row label="GST" value={money(gst)} />
+            <Row label="Round Off" value={money(q.roundOff)} />
             <div className="flex justify-between font-bold text-brand-900 border-t-2 border-brand-800 pt-2 mt-2 text-base">
-              <span>Total</span><span>₹ {money(total)}</span>
+              <span>Total</span><span>₹ {money(q.totalValue)}</span>
             </div>
           </div>
         </div>

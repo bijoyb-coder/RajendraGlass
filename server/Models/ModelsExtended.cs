@@ -430,7 +430,9 @@ public class QuotationDto
     public DateTime QuotationDate { get; set; }
     public DateTime? ValidUntil { get; set; }
     public string Status { get; set; } = "Draft";
+    /// <summary>Always rounded to the nearest whole rupee; the delta is <see cref="RoundOff"/>.</summary>
     public decimal TotalValue { get; set; }
+    public decimal RoundOff { get; set; }
     /// <summary>True while no sales order has been generated against this quotation — the same
     /// condition the server re-checks in DELETE (see QuotationsController.Delete).</summary>
     public bool CanDelete { get; set; }
@@ -537,7 +539,9 @@ public class SalesOrderDto
     public decimal BasicValue { get; set; }
     public decimal GstValue { get; set; }
     public string Status { get; set; } = "Draft";
+    /// <summary>Always rounded to the nearest whole rupee; the delta is <see cref="RoundOff"/>.</summary>
     public decimal TotalValue { get; set; }
+    public decimal RoundOff { get; set; }
     /// <summary>Set once a (non-cancelled) invoice has been generated against this order — the
     /// order is then locked from being invoiced again (mirrors QuotationId on the order itself).</summary>
     public int? InvoiceId { get; set; }
