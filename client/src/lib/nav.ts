@@ -3,7 +3,7 @@ import {
   LayoutGrid, Receipt, Truck, FileText, ClipboardList, Zap,
   Building2, Layers, Users, Factory, Warehouse,
   Boxes, ClipboardEdit, ArrowLeftRight, Puzzle, PackageSearch,
-  ShoppingCart, PackageCheck, FileStack,
+  ShoppingCart, PackageCheck, FileStack, ScanLine,
   Scissors, Wrench, LayoutList, Flame,
   Wallet, Receipt as ReceiptIcon, Wallet2,
   HeartHandshake,
@@ -66,6 +66,7 @@ export const navSections: { title: string; items: NavItem[] }[] = [
       { label: 'Purchase Orders', path: '/purchase/orders', icon: ShoppingCart, implemented: true, perm: 'PurchaseOrder.View' },
       { label: 'Goods Receipt (GRN)', path: '/purchase/grn', icon: PackageCheck, implemented: true, perm: 'Grn.View' },
       { label: 'Purchase Invoices', path: '/purchase/invoices', icon: FileStack, implemented: true, perm: 'PurchaseInvoice.View' },
+      { label: 'Purchase E-way Bill Entry', path: '/purchase/eway-bills', icon: ScanLine, implemented: true, perm: 'EwayBill.View' },
     ],
   },
   {

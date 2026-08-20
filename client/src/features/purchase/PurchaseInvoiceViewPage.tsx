@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Printer, ArrowLeft, Pencil, X } from 'lucide-react'
-import { useGetPurchaseInvoiceQuery, useUpdatePurchaseInvoiceMutation } from './purchaseApi'
+import { useGetPurchaseInvoiceQuery, useUpdatePurchaseInvoiceMutation, useListEwayBillsQuery } from './purchaseApi'
 import Logo from '../../components/Logo'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
@@ -17,14 +17,18 @@ export default function PurchaseInvoiceViewPage() {
   const navigate = useNavigate()
   const { data: pi, isLoading } = useGetPurchaseInvoiceQuery(Number(id))
   const [updateInvoice, { isLoading: saving }] = useUpdatePurchaseInvoiceMutation()
+  // This invoice's own supplier's e-Way Bills — including the one already linked to it (which is
+  // otherwise "used" and would be hidden by an availableOnly filter).
+  const { data: ewayBills } = useListEwayBillsQuery(pi ? { supplierId: pi.supplierId } : undefined, { skip: !pi })
+  const selectableEwayBills = ewayBills?.items.filter((eb) => !eb.isUsed || eb.ewayBillId === pi?.ewayBillId) ?? []
 
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState({ supplierInvoiceNo: '', ewayBillNo: '', invoiceDate: '' })
+  const [form, setForm] = useState<{ supplierInvoiceNo: string; ewayBillId: number | ''; invoiceDate: string }>({ supplierInvoiceNo: '', ewayBillId: '', invoiceDate: '' })
   const [error, setError] = useState<string | null>(null)
 
   function openEdit() {
     if (!pi) return
-    setForm({ supplierInvoiceNo: pi.supplierInvoiceNo ?? '', ewayBillNo: pi.ewayBillNo ?? '', invoiceDate: pi.invoiceDate.slice(0, 10) })
+    setForm({ supplierInvoiceNo: pi.supplierInvoiceNo ?? '', ewayBillId: pi.ewayBillId ?? '', invoiceDate: pi.invoiceDate.slice(0, 10) })
     setError(null)
     setEditing(true)
   }
@@ -35,7 +39,12 @@ export default function PurchaseInvoiceViewPage() {
     try {
       await updateInvoice({
         id: Number(id),
-        body: { supplierInvoiceNo: form.supplierInvoiceNo || undefined, ewayBillNo: form.ewayBillNo || undefined, invoiceDate: form.invoiceDate },
+        body: {
+          supplierInvoiceNo: form.supplierInvoiceNo || undefined,
+          ewayBillId: form.ewayBillId ? Number(form.ewayBillId) : undefined,
+          clearEwayBill: !form.ewayBillId,
+          invoiceDate: form.invoiceDate,
+        },
       }).unwrap()
       setEditing(false)
     } catch (err: any) {
@@ -84,7 +93,10 @@ export default function PurchaseInvoiceViewPage() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">e-Way Bill No.</label>
-            <input value={form.ewayBillNo} onChange={(e) => setForm((f) => ({ ...f, ewayBillNo: e.target.value }))} className={inputClass} />
+            <select value={form.ewayBillId} onChange={(e) => setForm((f) => ({ ...f, ewayBillId: e.target.value ? Number(e.target.value) : '' }))} className={inputClass}>
+              <option value="">No e-Way Bill</option>
+              {selectableEwayBills.map((eb) => <option key={eb.ewayBillId} value={eb.ewayBillId}>{eb.ewayBillNo} {eb.vehicleNo ? `— ${eb.vehicleNo}` : ''}</option>)}
+            </select>
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Invoice Date *</label>

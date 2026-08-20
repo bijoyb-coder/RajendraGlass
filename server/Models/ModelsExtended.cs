@@ -366,10 +366,13 @@ public class PurchaseInvoiceDto
     public string? GodownName { get; set; }
     public string? SupplierInvoiceNo { get; set; }
     public DateTime InvoiceDate { get; set; }
-    /// <summary>The supplier's own e-Way Bill number for this shipment — a plain reference field
-    /// entered off their paper invoice, not generated via any gateway (unlike Dispatch.Waybill's
-    /// outbound e-Way Bill, which this app does generate).</summary>
+    /// <summary>The supplier's own e-Way Bill number for this shipment, selected from the
+    /// Purchase &gt; E-way Bill Entry master (see <see cref="EwayBillDto"/>) rather than typed by
+    /// hand — not generated via any gateway (unlike Dispatch.Waybill's outbound e-Way Bill, which
+    /// this app does generate). This is a denormalized snapshot of the selected entry's number,
+    /// kept for print/search without a join; <see cref="EwayBillId"/> is the actual link.</summary>
     public string? EwayBillNo { get; set; }
+    public int? EwayBillId { get; set; }
     /// <summary>Drives which line layout and tax split (CGST+SGST vs IGST) this invoice uses.</summary>
     public bool IsInterState { get; set; }
     public decimal BasicValue { get; set; }
@@ -419,20 +422,56 @@ public class CreatePurchaseInvoiceRequest
     public int? GrnId { get; set; }
     public string? SupplierInvoiceNo { get; set; }
     public DateTime? InvoiceDate { get; set; }
-    public string? EwayBillNo { get; set; }
+    /// <summary>Selected from the Purchase &gt; E-way Bill Entry master. Optional — a Local invoice
+    /// often has none. Must not already be linked to another purchase invoice.</summary>
+    public int? EwayBillId { get; set; }
     /// <summary>Inter-State only; ignored for Local invoices.</summary>
     public decimal? InsurancePct { get; set; }
     public List<CreatePurchaseInvoiceLineRequest> Lines { get; set; } = new();
 }
 
-/// <summary>Fixes a wrong supplier reference number, e-Way Bill number or date on an already-booked
-/// purchase invoice — quantities/rates/stock are not editable here (they'd need their own stock
-/// reconciliation); delete and re-enter for anything beyond that.</summary>
+/// <summary>Fixes a wrong supplier reference number, e-Way Bill selection or date on an already-
+/// booked purchase invoice — quantities/rates/stock are not editable here (they'd need their own
+/// stock reconciliation); delete and re-enter for anything beyond that.</summary>
 public class UpdatePurchaseInvoiceRequest
 {
     public string? SupplierInvoiceNo { get; set; }
-    public string? EwayBillNo { get; set; }
+    /// <summary>Pass to change the linked e-Way Bill, or explicitly send null to clear it — either
+    /// way the old selection (if any) is freed back up for other invoices and the new one (if any)
+    /// is marked used.</summary>
+    public int? EwayBillId { get; set; }
+    public bool ClearEwayBill { get; set; }
     public DateTime? InvoiceDate { get; set; }
+}
+
+// ---------- Purchase: E-way Bill Entry (master, selected from a dropdown when booking a Purchase Invoice) ----------
+public class EwayBillDto
+{
+    public int EwayBillId { get; set; }
+    public string EwayBillNo { get; set; } = "";
+    public int SupplierId { get; set; }
+    public string? SupplierName { get; set; }
+    public DateTime EwayBillDate { get; set; }
+    public DateTime? ValidUpto { get; set; }
+    public string? VehicleNo { get; set; }
+    public string? DocumentNo { get; set; }
+    public decimal? GoodsValue { get; set; }
+    public bool IsUsed { get; set; }
+    /// <summary>Which purchase invoice it's linked to, once used — for the list view.</summary>
+    public int? PurchaseInvoiceId { get; set; }
+    public string? PurchaseInvoiceNo { get; set; }
+    public bool CanDelete { get; set; }
+}
+
+public class CreateEwayBillRequest
+{
+    public string EwayBillNo { get; set; } = "";
+    public int SupplierId { get; set; }
+    public DateTime EwayBillDate { get; set; }
+    public DateTime? ValidUpto { get; set; }
+    public string? VehicleNo { get; set; }
+    public string? DocumentNo { get; set; }
+    public decimal? GoodsValue { get; set; }
 }
 
 // ---------- Sales: Quotation / Sales Order ----------

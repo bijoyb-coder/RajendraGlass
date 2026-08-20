@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Plus, Trash2, Save } from 'lucide-react'
 import { useListProductsQuery } from '../masters/mastersApi'
-import { useListSuppliersQuery, useListPurchaseOrdersQuery, useListGrnsQuery, useCreatePurchaseInvoiceMutation } from './purchaseApi'
+import { useListSuppliersQuery, useListPurchaseOrdersQuery, useListGrnsQuery, useListEwayBillsQuery, useCreatePurchaseInvoiceMutation } from './purchaseApi'
 import type { CreatePurchaseInvoiceLineRequest } from '../../lib/types'
 
 interface LineRow extends CreatePurchaseInvoiceLineRequest {
@@ -49,7 +49,9 @@ export default function PurchaseInvoiceCreatePage() {
   const [purchaseOrderId, setPurchaseOrderId] = useState<number | ''>('')
   const [grnId, setGrnId] = useState<number | ''>('')
   const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('')
-  const [ewayBillNo, setEwayBillNo] = useState('')
+  const [ewayBillId, setEwayBillId] = useState<number | ''>('')
+  // Only entries for the chosen supplier, not already linked to another invoice.
+  const { data: ewayBills } = useListEwayBillsQuery(supplierId ? { supplierId: Number(supplierId), availableOnly: true } : { availableOnly: true })
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [isInterState, setIsInterState] = useState(false) // Local is the default
   const [insurancePct, setInsurancePct] = useState<number | ''>('')
@@ -101,7 +103,7 @@ export default function PurchaseInvoiceCreatePage() {
         purchaseOrderId: purchaseOrderId ? Number(purchaseOrderId) : undefined,
         grnId: grnId ? Number(grnId) : undefined,
         supplierInvoiceNo: supplierInvoiceNo || undefined,
-        ewayBillNo: ewayBillNo || undefined,
+        ewayBillId: ewayBillId ? Number(ewayBillId) : undefined,
         invoiceDate,
         insurancePct: isInterState && insurancePct ? Number(insurancePct) : undefined,
         lines: validLines.map((l) => (isInterState
@@ -136,7 +138,7 @@ export default function PurchaseInvoiceCreatePage() {
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Field label="Supplier *">
-              <select required value={supplierId} onChange={(e) => setSupplierId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
+              <select required value={supplierId} onChange={(e) => { setSupplierId(e.target.value ? Number(e.target.value) : ''); setEwayBillId('') }} className={inputClass}>
                 <option value="">Select supplier…</option>
                 {suppliers?.items.map((s) => <option key={s.supplierId} value={s.supplierId}>{s.name}</option>)}
               </select>
@@ -145,7 +147,11 @@ export default function PurchaseInvoiceCreatePage() {
               <input value={supplierInvoiceNo} onChange={(e) => setSupplierInvoiceNo(e.target.value)} className={inputClass} />
             </Field>
             <Field label="e-Way Bill No.">
-              <input value={ewayBillNo} onChange={(e) => setEwayBillNo(e.target.value)} className={inputClass} placeholder="Supplier's e-Way Bill no." />
+              <select value={ewayBillId} onChange={(e) => setEwayBillId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
+                <option value="">No e-Way Bill</option>
+                {ewayBills?.items.map((eb) => <option key={eb.ewayBillId} value={eb.ewayBillId}>{eb.ewayBillNo} {eb.vehicleNo ? `— ${eb.vehicleNo}` : ''}</option>)}
+              </select>
+              <Link to="/purchase/eway-bills" target="_blank" className="text-xs text-brand-600 hover:text-brand-700 mt-1 inline-block">+ Enter a new e-Way Bill</Link>
             </Field>
             <Field label="Invoice Date">
               <input type="date" max={new Date().toISOString().slice(0, 10)} value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={inputClass} />
