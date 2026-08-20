@@ -368,6 +368,14 @@ public class EwayBillsController(IDbConnectionFactory db) : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(req.EwayBillNo))
             return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = "e-Way Bill No. is required." });
+        // Checked here, not just left to the DB's column widths, so an overlong value gets a clear
+        // field-level message instead of a raw SQL truncation error.
+        if (req.EwayBillNo.Length > 30)
+            return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = "e-Way Bill No. cannot be more than 30 characters." });
+        if (req.VehicleNo?.Length > 50)
+            return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = "Vehicle No. cannot be more than 50 characters." });
+        if (req.DocumentNo?.Length > 50)
+            return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = "Document No. cannot be more than 50 characters." });
 
         using var conn = db.CreateConnection();
         var supplier = conn.QueryFirstOrDefault("SELECT SupplierId FROM Master.Supplier WHERE SupplierId = @SupplierId AND IsActive = 1", new { req.SupplierId });
