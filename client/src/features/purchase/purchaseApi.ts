@@ -2,6 +2,7 @@ import { api } from '../../app/api'
 import type {
   SupplierDto, PurchaseOrderDto, CreatePurchaseOrderRequest,
   GrnDto, CreateGrnRequest, PurchaseInvoiceDto, CreatePurchaseInvoiceRequest, UpdatePurchaseInvoiceRequest,
+  EwayBillDto, CreateEwayBillRequest,
 } from '../../lib/types'
 
 export const purchaseApi = api.injectEndpoints({
@@ -59,15 +60,28 @@ export const purchaseApi = api.injectEndpoints({
     }),
     createPurchaseInvoice: builder.mutation<{ purchaseInvoiceId: number; invoiceNo: string }, CreatePurchaseInvoiceRequest>({
       query: (body) => ({ url: '/purchase-invoices', method: 'POST', body }),
-      invalidatesTags: ['PurchaseInvoice', 'Grn', 'Stock'],
+      invalidatesTags: ['PurchaseInvoice', 'Grn', 'Stock', 'EwayBill'],
     }),
     updatePurchaseInvoice: builder.mutation<void, { id: number; body: UpdatePurchaseInvoiceRequest }>({
       query: ({ id, body }) => ({ url: `/purchase-invoices/${id}`, method: 'PUT', body }),
-      invalidatesTags: (_r, _e, { id }) => ['PurchaseInvoice', { type: 'PurchaseInvoice', id }],
+      invalidatesTags: (_r, _e, { id }) => ['PurchaseInvoice', { type: 'PurchaseInvoice', id }, 'EwayBill'],
     }),
     deletePurchaseInvoice: builder.mutation<void, number>({
       query: (id) => ({ url: `/purchase-invoices/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['PurchaseInvoice', 'Grn', 'Stock'],
+      invalidatesTags: ['PurchaseInvoice', 'Grn', 'Stock', 'EwayBill'],
+    }),
+
+    listEwayBills: builder.query<{ items: EwayBillDto[] }, { supplierId?: number; availableOnly?: boolean } | void>({
+      query: (args) => ({ url: '/eway-bills', params: args ?? {} }),
+      providesTags: ['EwayBill'],
+    }),
+    createEwayBill: builder.mutation<{ ewayBillId: number }, CreateEwayBillRequest>({
+      query: (body) => ({ url: '/eway-bills', method: 'POST', body }),
+      invalidatesTags: ['EwayBill'],
+    }),
+    deleteEwayBill: builder.mutation<void, number>({
+      query: (id) => ({ url: `/eway-bills/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['EwayBill'],
     }),
   }),
 })
@@ -89,4 +103,7 @@ export const {
   useCreatePurchaseInvoiceMutation,
   useUpdatePurchaseInvoiceMutation,
   useDeletePurchaseInvoiceMutation,
+  useListEwayBillsQuery,
+  useCreateEwayBillMutation,
+  useDeleteEwayBillMutation,
 } = purchaseApi

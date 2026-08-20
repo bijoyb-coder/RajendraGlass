@@ -54,7 +54,7 @@ export const api = createApi({
   tagTypes: [
     'Company', 'Product', 'Customer', 'Invoice', 'Waybill', 'Transporter', 'Dashboard',
     'Stock', 'StockAdjustment', 'StockTransfer', 'Offcut', 'Supplier', 'PurchaseOrder', 'Grn',
-    'PurchaseInvoice', 'Quotation', 'SalesOrder', 'CuttingPlan', 'WorkOrder', 'JobCard',
+    'PurchaseInvoice', 'EwayBill', 'Quotation', 'SalesOrder', 'CuttingPlan', 'WorkOrder', 'JobCard',
     'FurnaceBatch', 'Voucher', 'Expense', 'Complaint', 'Employee', 'Attendance', 'CounterInvoice',
     'Role', 'User', 'Notification', 'Godown', 'Rack', 'RackStock',
   ],

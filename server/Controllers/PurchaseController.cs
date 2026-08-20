@@ -322,6 +322,90 @@ public class GrnController(IDbConnectionFactory db) : ControllerBase
 }
 
 [ApiController]
+[Route("api/v1/eway-bills")]
+[Authorize]
+public class EwayBillsController(IDbConnectionFactory db) : ControllerBase
+{
+    /// <summary>Entered once off the supplier's e-Way Bill slip/QR printout, then picked from a
+    /// dropdown when booking the matching Purchase Invoice, instead of re-typing the number by
+    /// hand. <c>IsUsed</c>/<c>CanDelete</c> are the same idea from two ends: once linked to an
+    /// invoice it drops out of the "available" dropdown and can no longer be deleted (delete the
+    /// invoice first, which frees it back up automatically).</summary>
+    private const string ListColumns =
+        @"e.EwayBillId, e.EwayBillNo, e.SupplierId, s.Name AS SupplierName, e.EwayBillDate, e.ValidUpto,
+          e.VehicleNo, e.DocumentNo, e.GoodsValue, e.IsUsed, pi.PurchaseInvoiceId, pi.InvoiceNo AS PurchaseInvoiceNo,
+          CAST(CASE WHEN e.IsUsed = 0 THEN 1 ELSE 0 END AS BIT) AS CanDelete
+          FROM Purchase.EwayBill e
+          JOIN Master.Supplier s ON s.SupplierId = e.SupplierId
+          LEFT JOIN Purchase.PurchaseInvoice pi ON pi.EwayBillId = e.EwayBillId";
+
+    /// <summary>?supplierId= narrows to one supplier's e-Way Bills; ?availableOnly=true (used by the
+    /// Purchase Invoice Entry dropdown) excludes ones already linked to another invoice.</summary>
+    [HttpGet]
+    public IActionResult List([FromQuery] int? supplierId, [FromQuery] bool availableOnly = false)
+    {
+        using var conn = db.CreateConnection();
+        var rows = conn.Query<EwayBillDto>(
+            $@"SELECT {ListColumns}
+               WHERE (@supplierId IS NULL OR e.SupplierId = @supplierId)
+                 AND (@availableOnly = 0 OR e.IsUsed = 0)
+               ORDER BY e.EwayBillId DESC", new { supplierId, availableOnly });
+        return Ok(new { items = rows });
+    }
+
+    [HttpGet("{id:int}")]
+    public IActionResult Get(int id)
+    {
+        using var conn = db.CreateConnection();
+        var e = conn.QueryFirstOrDefault<EwayBillDto>($"SELECT {ListColumns} WHERE e.EwayBillId = @id", new { id });
+        if (e is null) return NotFound();
+        return Ok(e);
+    }
+
+    [RequirePermission("EwayBill.Create")]
+    [HttpPost]
+    public IActionResult Create([FromBody] CreateEwayBillRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.EwayBillNo))
+            return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = "e-Way Bill No. is required." });
+
+        using var conn = db.CreateConnection();
+        var supplier = conn.QueryFirstOrDefault("SELECT SupplierId FROM Master.Supplier WHERE SupplierId = @SupplierId AND IsActive = 1", new { req.SupplierId });
+        if (supplier is null)
+            return UnprocessableEntity(new ProblemResponse { Title = "Supplier required", Status = 422, ErrorCode = "SUPPLIER_REQUIRED", Detail = "Select an active supplier." });
+
+        if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Purchase.EwayBill WHERE EwayBillNo = @EwayBillNo", new { req.EwayBillNo }) > 0)
+            return Conflict(new ProblemResponse { Title = "Duplicate e-Way Bill", Status = 409, ErrorCode = "EWAYBILL_DUPLICATE", Detail = "This e-Way Bill No. has already been entered." });
+
+        var id = conn.ExecuteScalar<int>(
+            @"INSERT INTO Purchase.EwayBill (EwayBillNo, SupplierId, EwayBillDate, ValidUpto, VehicleNo, DocumentNo, GoodsValue)
+              OUTPUT INSERTED.EwayBillId
+              VALUES (@EwayBillNo, @SupplierId, @EwayBillDate, @ValidUpto, @VehicleNo, @DocumentNo, @GoodsValue)", req);
+
+        conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'EwayBill', @id)", new { id = id.ToString() });
+        return Created($"/api/v1/eway-bills/{id}", new { ewayBillId = id });
+    }
+
+    /// <summary>Only while not yet linked to a Purchase Invoice — same idea as GRN/Purchase Invoice
+    /// delete, but simpler here since an unused e-Way Bill entry has no stock or ledger effect at
+    /// all, only a link that hasn't been made yet.</summary>
+    [RequirePermission("EwayBill.Delete")]
+    [HttpDelete("{id:int}")]
+    public IActionResult Delete(int id)
+    {
+        using var conn = db.CreateConnection();
+        var e = conn.QueryFirstOrDefault("SELECT EwayBillId, IsUsed FROM Purchase.EwayBill WHERE EwayBillId = @id", new { id });
+        if (e is null) return NotFound();
+        if ((bool)e.IsUsed)
+            return Conflict(new ProblemResponse { Title = "e-Way Bill in use", Status = 409, ErrorCode = "EWAYBILL_IN_USE", Detail = "This e-Way Bill is already linked to a purchase invoice; delete that invoice first to free it up." });
+
+        conn.Execute("DELETE FROM Purchase.EwayBill WHERE EwayBillId = @id", new { id });
+        conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Delete', 'EwayBill', @id)", new { id = id.ToString() });
+        return NoContent();
+    }
+}
+
+[ApiController]
 [Route("api/v1/purchase-invoices")]
 [Authorize]
 public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBase
@@ -333,7 +417,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
     private const string ListColumns =
         @"pi.PurchaseInvoiceId, pi.InvoiceNo, pi.SupplierId, s.Name AS SupplierName,
           pi.PurchaseOrderId, po.PoNo, pi.GrnId, g.GrnNo, pi.GodownId, gd.Name AS GodownName,
-          pi.SupplierInvoiceNo, pi.InvoiceDate, pi.EwayBillNo, pi.IsInterState,
+          pi.SupplierInvoiceNo, pi.InvoiceDate, pi.EwayBillNo, pi.EwayBillId, pi.IsInterState,
           pi.BasicValue, pi.InsuranceValue, pi.TaxableValue, pi.CgstValue, pi.SgstValue, pi.IgstValue, pi.RoundOff, pi.TotalValue, pi.Status
           FROM Purchase.PurchaseInvoice pi
           LEFT JOIN Master.Supplier s ON s.SupplierId = pi.SupplierId
@@ -418,6 +502,20 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                     transaction: tx) ?? 1;
             }
 
+            // e-Way Bill is optional (a Local invoice often has none) and, when given, must be a
+            // real unused entry from the Purchase > E-way Bill Entry master -- selected via
+            // dropdown rather than typed, so EwayBillNo below is just a denormalized snapshot.
+            string? ewayBillNo = null;
+            if (req.EwayBillId.HasValue)
+            {
+                var eb = conn.QueryFirstOrDefault("SELECT EwayBillNo, IsUsed FROM Purchase.EwayBill WHERE EwayBillId = @EwayBillId", new { req.EwayBillId }, tx);
+                if (eb is null)
+                    return UnprocessableEntity(new ProblemResponse { Title = "Invalid e-Way Bill", Status = 422, ErrorCode = "EWAYBILL_INVALID", Detail = "The selected e-Way Bill does not exist." });
+                if ((bool)eb.IsUsed)
+                    return Conflict(new ProblemResponse { Title = "e-Way Bill in use", Status = 409, ErrorCode = "EWAYBILL_IN_USE", Detail = "The selected e-Way Bill is already linked to another purchase invoice." });
+                ewayBillNo = (string)eb.EwayBillNo;
+            }
+
             int branchId = DocNumbering.DefaultBranchId(conn, tx);
             string invoiceNo = DocNumbering.NextNumber(conn, tx, branchId, "PurchaseInvoice");
 
@@ -428,10 +526,13 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
 
             var id = conn.ExecuteScalar<int>(
                 @"INSERT INTO Purchase.PurchaseInvoice
-                    (InvoiceNo, SupplierId, PurchaseOrderId, GrnId, GodownId, SupplierInvoiceNo, InvoiceDate, EwayBillNo, IsInterState, Status)
+                    (InvoiceNo, SupplierId, PurchaseOrderId, GrnId, GodownId, SupplierInvoiceNo, InvoiceDate, EwayBillNo, EwayBillId, IsInterState, Status)
                   OUTPUT INSERTED.PurchaseInvoiceId
-                  VALUES (@invoiceNo, @SupplierId, @PurchaseOrderId, @GrnId, @godownId, @SupplierInvoiceNo, ISNULL(@InvoiceDate, CAST(SYSUTCDATETIME() AS DATE)), @EwayBillNo, @IsInterState, 'Booked')",
-                new { invoiceNo, req.SupplierId, req.PurchaseOrderId, req.GrnId, godownId, req.SupplierInvoiceNo, req.InvoiceDate, req.EwayBillNo, req.IsInterState }, tx);
+                  VALUES (@invoiceNo, @SupplierId, @PurchaseOrderId, @GrnId, @godownId, @SupplierInvoiceNo, ISNULL(@InvoiceDate, CAST(SYSUTCDATETIME() AS DATE)), @ewayBillNo, @EwayBillId, @IsInterState, 'Booked')",
+                new { invoiceNo, req.SupplierId, req.PurchaseOrderId, req.GrnId, godownId, req.SupplierInvoiceNo, req.InvoiceDate, ewayBillNo, req.EwayBillId, req.IsInterState }, tx);
+
+            if (req.EwayBillId.HasValue)
+                conn.Execute("UPDATE Purchase.EwayBill SET IsUsed = 1 WHERE EwayBillId = @EwayBillId", new { req.EwayBillId }, tx);
 
             decimal basicTotal = 0, taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
             foreach (var l in req.Lines)
@@ -508,7 +609,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         }
     }
 
-    /// <summary>Fixes a wrong supplier reference number, e-Way Bill number or date — quantities/
+    /// <summary>Fixes a wrong supplier reference number, e-Way Bill selection or date — quantities/
     /// rates/stock are not editable here (see UpdatePurchaseInvoiceRequest); delete and re-enter
     /// for anything beyond that, same as every other document in this app that doesn't support
     /// in-place line edits.</summary>
@@ -517,17 +618,68 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
     public IActionResult Update(int id, [FromBody] UpdatePurchaseInvoiceRequest req)
     {
         using var conn = db.CreateConnection();
-        var rows = conn.Execute(
-            @"UPDATE Purchase.PurchaseInvoice SET
-                SupplierInvoiceNo = @SupplierInvoiceNo,
-                EwayBillNo = @EwayBillNo,
-                InvoiceDate = ISNULL(@InvoiceDate, InvoiceDate)
-              WHERE PurchaseInvoiceId = @id",
-            new { id, req.SupplierInvoiceNo, req.EwayBillNo, req.InvoiceDate });
-        if (rows == 0) return NotFound();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var current = conn.QueryFirstOrDefault("SELECT EwayBillId FROM Purchase.PurchaseInvoice WHERE PurchaseInvoiceId = @id", new { id }, tx);
+            if (current is null) { tx.Rollback(); return NotFound(); }
+            int? currentEwayBillId = (int?)current.EwayBillId;
 
-        conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Update', 'PurchaseInvoice', @id)", new { id = id.ToString() });
-        return NoContent();
+            // Only touch the e-Way Bill link if the caller actually sent something -- either a new
+            // EwayBillId to switch to, or ClearEwayBill=true to unlink. Omitting both leaves the
+            // existing link (if any) untouched, same as SupplierInvoiceNo/InvoiceDate below.
+            string? newEwayBillNo = null;
+            int? newEwayBillId = currentEwayBillId;
+            bool touchingEwayBill = req.EwayBillId.HasValue || req.ClearEwayBill;
+
+            if (req.EwayBillId.HasValue && req.EwayBillId != currentEwayBillId)
+            {
+                var eb = conn.QueryFirstOrDefault("SELECT EwayBillNo, IsUsed FROM Purchase.EwayBill WHERE EwayBillId = @EwayBillId", new { req.EwayBillId }, tx);
+                if (eb is null)
+                    return UnprocessableEntity(new ProblemResponse { Title = "Invalid e-Way Bill", Status = 422, ErrorCode = "EWAYBILL_INVALID", Detail = "The selected e-Way Bill does not exist." });
+                if ((bool)eb.IsUsed)
+                    return Conflict(new ProblemResponse { Title = "e-Way Bill in use", Status = 409, ErrorCode = "EWAYBILL_IN_USE", Detail = "The selected e-Way Bill is already linked to another purchase invoice." });
+                newEwayBillNo = (string)eb.EwayBillNo;
+                newEwayBillId = req.EwayBillId;
+            }
+            else if (req.ClearEwayBill)
+            {
+                newEwayBillId = null;
+            }
+            else if (currentEwayBillId.HasValue)
+            {
+                newEwayBillNo = conn.ExecuteScalar<string?>("SELECT EwayBillNo FROM Purchase.EwayBill WHERE EwayBillId = @currentEwayBillId", new { currentEwayBillId }, tx);
+            }
+
+            var rows = conn.Execute(
+                touchingEwayBill
+                    ? @"UPDATE Purchase.PurchaseInvoice SET
+                          SupplierInvoiceNo = @SupplierInvoiceNo,
+                          EwayBillNo = @newEwayBillNo,
+                          EwayBillId = @newEwayBillId,
+                          InvoiceDate = ISNULL(@InvoiceDate, InvoiceDate)
+                        WHERE PurchaseInvoiceId = @id"
+                    : @"UPDATE Purchase.PurchaseInvoice SET
+                          SupplierInvoiceNo = @SupplierInvoiceNo,
+                          InvoiceDate = ISNULL(@InvoiceDate, InvoiceDate)
+                        WHERE PurchaseInvoiceId = @id",
+                new { id, req.SupplierInvoiceNo, req.InvoiceDate, newEwayBillNo, newEwayBillId }, tx);
+            if (rows == 0) { tx.Rollback(); return NotFound(); }
+
+            if (touchingEwayBill && currentEwayBillId.HasValue && currentEwayBillId != newEwayBillId)
+                conn.Execute("UPDATE Purchase.EwayBill SET IsUsed = 0 WHERE EwayBillId = @currentEwayBillId", new { currentEwayBillId }, tx);
+            if (touchingEwayBill && newEwayBillId.HasValue && currentEwayBillId != newEwayBillId)
+                conn.Execute("UPDATE Purchase.EwayBill SET IsUsed = 1 WHERE EwayBillId = @newEwayBillId", new { newEwayBillId }, tx);
+
+            conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Update', 'PurchaseInvoice', @id)", new { id = id.ToString() }, tx);
+            tx.Commit();
+            return NoContent();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 
     /// <summary>Unlike the old flat-total booking, this invoice adds real stock on Create (see
@@ -579,6 +731,11 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
             conn.Execute("DELETE FROM Inventory.StockMovement WHERE DocType = 'PurchaseInvoice' AND DocId = @id", new { id }, tx);
             conn.Execute("DELETE FROM Purchase.PurchaseInvoiceLine WHERE PurchaseInvoiceId = @id", new { id }, tx);
             conn.Execute("DELETE FROM Purchase.PurchaseInvoice WHERE PurchaseInvoiceId = @id", new { id }, tx);
+
+            // Free the linked e-Way Bill back up so it can be selected for another invoice.
+            int? ewayBillId = (int?)header.EwayBillId;
+            if (ewayBillId.HasValue)
+                conn.Execute("UPDATE Purchase.EwayBill SET IsUsed = 0 WHERE EwayBillId = @ewayBillId", new { ewayBillId }, tx);
 
             AuditLogger.LogDelete(conn, tx, User, HttpContext, "PurchaseInvoice", id.ToString(), new { PurchaseInvoice = header, Lines = lines, ReversedStockMovements = movements });
             tx.Commit();

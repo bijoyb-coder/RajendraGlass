@@ -325,8 +325,10 @@ export interface PurchaseInvoiceDto {
   grnId?: number | null; grnNo?: string | null
   godownId?: number | null; godownName?: string | null
   supplierInvoiceNo?: string | null; invoiceDate: string
-  /** The supplier's own e-Way Bill number for this shipment, entered off their paper invoice. */
+  /** The supplier's own e-Way Bill number, selected from the Purchase > E-way Bill Entry master
+   * (see EwayBillDto) — a denormalized snapshot for display/search; ewayBillId is the actual link. */
   ewayBillNo?: string | null
+  ewayBillId?: number | null
   /** Drives which line layout and tax split (CGST+SGST vs IGST) this invoice uses. */
   isInterState: boolean
   basicValue: number
@@ -354,14 +356,39 @@ export interface CreatePurchaseInvoiceRequest {
   /** Optional — defaults to the 'MAIN' godown server-side when not supplied. */
   godownId?: number
   purchaseOrderId?: number; grnId?: number
-  supplierInvoiceNo?: string; invoiceDate?: string; ewayBillNo?: string
+  supplierInvoiceNo?: string; invoiceDate?: string
+  /** Selected from the Purchase > E-way Bill Entry dropdown; optional (Local invoices often have none). */
+  ewayBillId?: number
   /** Inter-State only; ignored for Local invoices. */
   insurancePct?: number
   lines: CreatePurchaseInvoiceLineRequest[]
 }
-/** Fixes a wrong supplier reference number, e-Way Bill number or date — quantities/rates/stock
+/** Fixes a wrong supplier reference number, e-Way Bill selection or date — quantities/rates/stock
  * are not editable here; delete and re-enter for anything beyond that. */
-export interface UpdatePurchaseInvoiceRequest { supplierInvoiceNo?: string; ewayBillNo?: string; invoiceDate?: string }
+export interface UpdatePurchaseInvoiceRequest {
+  supplierInvoiceNo?: string
+  /** Pass to switch the linked e-Way Bill; set clearEwayBill instead to unlink without picking a new one. */
+  ewayBillId?: number
+  clearEwayBill?: boolean
+  invoiceDate?: string
+}
+
+/** Entered once off the supplier's e-Way Bill slip/QR printout, then picked from a dropdown when
+ * booking the matching Purchase Invoice instead of retyping the number by hand. */
+export interface EwayBillDto {
+  ewayBillId: number; ewayBillNo: string; supplierId: number; supplierName?: string | null
+  ewayBillDate: string; validUpto?: string | null; vehicleNo?: string | null; documentNo?: string | null
+  goodsValue?: number | null
+  isUsed: boolean
+  /** Set once linked to a purchase invoice. */
+  purchaseInvoiceId?: number | null; purchaseInvoiceNo?: string | null
+  /** True while not yet linked to a purchase invoice. */
+  canDelete: boolean
+}
+export interface CreateEwayBillRequest {
+  ewayBillNo: string; supplierId: number; ewayBillDate: string
+  validUpto?: string; vehicleNo?: string; documentNo?: string; goodsValue?: number
+}
 
 // ---------- Sales: Quotation / Order ----------
 /** @deprecated Superseded by DimensionUnit; kept only for older stored rows. */
