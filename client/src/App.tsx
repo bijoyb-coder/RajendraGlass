@@ -36,6 +36,7 @@ import PurchaseOrderViewPage from './features/purchase/PurchaseOrderViewPage'
 import GrnPage from './features/purchase/GrnPage'
 import GrnViewPage from './features/purchase/GrnViewPage'
 import PurchaseInvoicesPage from './features/purchase/PurchaseInvoicesPage'
+import PurchaseInvoiceCreatePage from './features/purchase/PurchaseInvoiceCreatePage'
 import PurchaseInvoiceViewPage from './features/purchase/PurchaseInvoiceViewPage'
 
 import CuttingPlansPage from './features/cutting/CuttingPlansPage'
@@ -100,6 +101,7 @@ export default function App() {
             <Route path="/purchase/grn" element={<GrnPage />} />
             <Route path="/purchase/grn/:id" element={<GrnViewPage />} />
             <Route path="/purchase/invoices" element={<PurchaseInvoicesPage />} />
+            <Route path="/purchase/invoices/new" element={<PurchaseInvoiceCreatePage />} />
             <Route path="/purchase/invoices/:id" element={<PurchaseInvoiceViewPage />} />
 
             <Route path="/cutting/plans" element={<CuttingPlansPage />} />

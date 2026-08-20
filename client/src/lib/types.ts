@@ -305,16 +305,59 @@ export interface GrnDto {
 }
 export interface CreateGrnRequest { purchaseOrderId: number; lines: GrnLineDto[] }
 
-export interface PurchaseInvoiceDto {
-  purchaseInvoiceId: number; invoiceNo?: string | null; grnId: number; grnNo?: string | null; supplierName?: string | null
-  supplierInvoiceNo?: string | null; invoiceDate: string; totalValue: number; status: string
-  /** Nothing is ever generated against a purchase invoice, so this is always true. */
-  canDelete: boolean
+/** One line entered directly off the supplier's paper tax invoice. Local lines only ever carry
+ * qty/rate; Inter-State lines also carry the physical breakdown, which is how area (and so
+ * basicValue) gets derived server-side. */
+export interface PurchaseInvoiceLineDto {
+  productId: number; productCode?: string | null; productDescription?: string | null; description?: string | null
+  // ----- Inter-State only (null for Local lines) -----
+  thicknessMm?: number | null; widthCm?: number | null; lengthCm?: number | null
+  noOfCrates?: number | null; sheetsPerCrate?: number | null
+  // ----- common -----
+  qty: number; area: number; rate: number; basicValue: number; gstPct: number
+  taxableValue: number; cgstAmount: number; sgstAmount: number; igstAmount: number; netValue: number
 }
-export interface CreatePurchaseInvoiceRequest { grnId: number; supplierInvoiceNo?: string; totalValue: number }
-/** Fixes a wrong entry on an already-booked purchase invoice — unlike the GRN and purchase
- * order it derives from, this document can always be edited. */
-export interface UpdatePurchaseInvoiceRequest { supplierInvoiceNo?: string; invoiceDate?: string; totalValue: number }
+
+export interface PurchaseInvoiceDto {
+  purchaseInvoiceId: number; invoiceNo?: string | null; supplierId: number; supplierName?: string | null
+  /** Purely an optional cross-reference now — neither is required to book the invoice. */
+  purchaseOrderId?: number | null; poNo?: string | null
+  grnId?: number | null; grnNo?: string | null
+  godownId?: number | null; godownName?: string | null
+  supplierInvoiceNo?: string | null; invoiceDate: string
+  /** Drives which line layout and tax split (CGST+SGST vs IGST) this invoice uses. */
+  isInterState: boolean
+  basicValue: number
+  /** Inter-State only — a flat % applied across all lines' basicValue. */
+  insuranceValue: number
+  taxableValue: number; cgstValue: number; sgstValue: number; igstValue: number; roundOff: number
+  totalValue: number; status: string
+  /** True unless the stock this invoice added has since moved on (checked authoritatively at
+   * delete time — same caveat GrnDto.canDelete carries). */
+  canDelete: boolean
+  lines: PurchaseInvoiceLineDto[]
+}
+
+export interface CreatePurchaseInvoiceLineRequest {
+  productId: number; description?: string
+  // ----- Inter-State only -----
+  thicknessMm?: number; widthCm?: number; lengthCm?: number; noOfCrates?: number; sheetsPerCrate?: number
+  // ----- Local only -----
+  qty?: number
+  // ----- common -----
+  rate: number; gstPct?: number
+}
+export interface CreatePurchaseInvoiceRequest {
+  supplierId: number; godownId: number; isInterState: boolean
+  purchaseOrderId?: number; grnId?: number
+  supplierInvoiceNo?: string; invoiceDate?: string
+  /** Inter-State only; ignored for Local invoices. */
+  insurancePct?: number
+  lines: CreatePurchaseInvoiceLineRequest[]
+}
+/** Fixes a wrong supplier reference number or date — quantities/rates/stock are not editable
+ * here; delete and re-enter for anything beyond that. */
+export interface UpdatePurchaseInvoiceRequest { supplierInvoiceNo?: string; invoiceDate?: string }
 
 // ---------- Sales: Quotation / Order ----------
 /** @deprecated Superseded by DimensionUnit; kept only for older stored rows. */

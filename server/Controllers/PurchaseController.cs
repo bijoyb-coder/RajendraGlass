@@ -326,12 +326,20 @@ public class GrnController(IDbConnectionFactory db) : ControllerBase
 [Authorize]
 public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBase
 {
+    /// <summary>Entered directly off the supplier's paper tax invoice — Local (CGST+SGST) or
+    /// Inter-State (IGST), picked by the operator, not auto-detected. PO/GRN are optional
+    /// cross-references only; the invoice adds stock itself (see Create) rather than depending on
+    /// a GRN to have already done so.</summary>
     private const string ListColumns =
-        @"pi.PurchaseInvoiceId, pi.InvoiceNo, pi.GrnId, g.GrnNo, s.Name AS SupplierName, pi.SupplierInvoiceNo, pi.InvoiceDate, pi.TotalValue, pi.Status
+        @"pi.PurchaseInvoiceId, pi.InvoiceNo, pi.SupplierId, s.Name AS SupplierName,
+          pi.PurchaseOrderId, po.PoNo, pi.GrnId, g.GrnNo, pi.GodownId, gd.Name AS GodownName,
+          pi.SupplierInvoiceNo, pi.InvoiceDate, pi.IsInterState,
+          pi.BasicValue, pi.InsuranceValue, pi.TaxableValue, pi.CgstValue, pi.SgstValue, pi.IgstValue, pi.RoundOff, pi.TotalValue, pi.Status
           FROM Purchase.PurchaseInvoice pi
-          JOIN Purchase.Grn g ON g.GrnId = pi.GrnId
-          JOIN Purchase.PurchaseOrder po ON po.PurchaseOrderId = g.PurchaseOrderId
-          JOIN Master.Supplier s ON s.SupplierId = po.SupplierId";
+          LEFT JOIN Master.Supplier s ON s.SupplierId = pi.SupplierId
+          LEFT JOIN Purchase.PurchaseOrder po ON po.PurchaseOrderId = pi.PurchaseOrderId
+          LEFT JOIN Purchase.Grn g ON g.GrnId = pi.GrnId
+          LEFT JOIN Company.Godown gd ON gd.GodownId = pi.GodownId";
 
     [HttpGet]
     public IActionResult List()
@@ -346,38 +354,134 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
     {
         using var conn = db.CreateConnection();
         var pi = conn.QueryFirstOrDefault<PurchaseInvoiceDto>($"SELECT {ListColumns} WHERE pi.PurchaseInvoiceId = @id", new { id });
-        return pi is null ? NotFound() : Ok(pi);
+        if (pi is null) return NotFound();
+        pi.Lines = conn.Query<PurchaseInvoiceLineDto>(
+            @"SELECT l.ProductId, p.Code AS ProductCode, p.Description AS ProductDescription, l.Description,
+                     l.ThicknessMm, l.WidthCm, l.LengthCm, l.NoOfCrates, l.SheetsPerCrate,
+                     l.Qty, l.Area, l.Rate, l.BasicValue, l.GstPct, l.TaxableValue, l.CgstAmount, l.SgstAmount, l.IgstAmount, l.NetValue
+              FROM Purchase.PurchaseInvoiceLine l JOIN Master.Product p ON p.ProductId = l.ProductId
+              WHERE l.PurchaseInvoiceId = @id", new { id }).ToList();
+        return Ok(pi);
     }
 
+    /// <summary>Books a supplier's tax invoice directly — Local or Inter-State, matching the two
+    /// paper formats — and adds the stock it represents in one step (the way a GRN used to be the
+    /// only thing that added stock; a GRN is now purely an optional reference, not a requirement).
+    /// </summary>
     [RequirePermission("PurchaseInvoice.Create")]
     [HttpPost]
     public IActionResult Create([FromBody] CreatePurchaseInvoiceRequest req)
     {
+        if (req.Lines.Count == 0)
+            return UnprocessableEntity(new ProblemResponse { Title = "No lines", Status = 422, ErrorCode = "LINES_REQUIRED", Detail = "A purchase invoice must have at least one line." });
+
+        for (int i = 0; i < req.Lines.Count; i++)
+        {
+            var l = req.Lines[i];
+            if (req.IsInterState)
+            {
+                if (l.ThicknessMm is null or <= 0 || l.WidthCm is null or <= 0 || l.LengthCm is null or <= 0 || l.NoOfCrates is null or <= 0 || l.SheetsPerCrate is null or <= 0)
+                    return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Thickness, Width, Length, No. of Crates and Sheets per Crate are all required for an Inter-State line." });
+            }
+            else
+            {
+                if (l.Qty is null or <= 0)
+                    return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Quantity is required for a Local line." });
+            }
+            if (l.Rate <= 0)
+                return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Rate must be greater than zero." });
+        }
+
         using var conn = db.CreateConnection();
         using var tx = conn.BeginTransaction();
         try
         {
-            var grn = conn.QueryFirstOrDefault("SELECT GrnId, Status FROM Purchase.Grn WHERE GrnId = @GrnId", new { req.GrnId }, tx);
-            if (grn is null)
-            {
-                tx.Rollback();
-                return UnprocessableEntity(new ProblemResponse { Title = "GRN required", Status = 422, ErrorCode = "GRN_REQUIRED", Detail = "A purchase invoice must reference a posted GRN." });
-            }
+            var supplier = conn.QueryFirstOrDefault("SELECT SupplierId FROM Master.Supplier WHERE SupplierId = @SupplierId AND IsActive = 1", new { req.SupplierId }, tx);
+            if (supplier is null)
+                return UnprocessableEntity(new ProblemResponse { Title = "Supplier required", Status = 422, ErrorCode = "SUPPLIER_REQUIRED", Detail = "Select an active supplier." });
 
-            var existing = conn.QueryFirstOrDefault<int?>("SELECT PurchaseInvoiceId FROM Purchase.PurchaseInvoice WHERE GrnId = @GrnId", new { req.GrnId }, tx);
-            if (existing.HasValue)
-            {
-                tx.Rollback();
-                return Conflict(new ProblemResponse { Title = "Duplicate", Status = 409, ErrorCode = "DUPLICATE_DOC", Detail = $"An invoice already exists for this GRN (id {existing})." });
-            }
+            var godown = conn.QueryFirstOrDefault("SELECT GodownId FROM Company.Godown WHERE GodownId = @GodownId AND IsActive = 1", new { req.GodownId }, tx);
+            if (godown is null)
+                return UnprocessableEntity(new ProblemResponse { Title = "Godown required", Status = 422, ErrorCode = "GODOWN_REQUIRED", Detail = "Select an active godown to receive the stock into." });
 
             int branchId = DocNumbering.DefaultBranchId(conn, tx);
             string invoiceNo = DocNumbering.NextNumber(conn, tx, branchId, "PurchaseInvoice");
 
+            var productIds = req.Lines.Select(l => l.ProductId).Distinct().ToArray();
+            var gstByProduct = conn.Query<(int ProductId, decimal GstRatePct)>(
+                "SELECT ProductId, GstRatePct FROM Master.Product WHERE ProductId IN @ids", new { ids = productIds }, tx)
+                .ToDictionary(r => r.ProductId, r => r.GstRatePct);
+
             var id = conn.ExecuteScalar<int>(
-                @"INSERT INTO Purchase.PurchaseInvoice (InvoiceNo, GrnId, SupplierInvoiceNo, TotalValue, Status)
-                  OUTPUT INSERTED.PurchaseInvoiceId VALUES (@invoiceNo, @GrnId, @SupplierInvoiceNo, @TotalValue, 'Booked')",
-                new { invoiceNo, req.GrnId, req.SupplierInvoiceNo, req.TotalValue }, tx);
+                @"INSERT INTO Purchase.PurchaseInvoice
+                    (InvoiceNo, SupplierId, PurchaseOrderId, GrnId, GodownId, SupplierInvoiceNo, InvoiceDate, IsInterState, Status)
+                  OUTPUT INSERTED.PurchaseInvoiceId
+                  VALUES (@invoiceNo, @SupplierId, @PurchaseOrderId, @GrnId, @GodownId, @SupplierInvoiceNo, ISNULL(@InvoiceDate, CAST(SYSUTCDATETIME() AS DATE)), @IsInterState, 'Booked')",
+                new { invoiceNo, req.SupplierId, req.PurchaseOrderId, req.GrnId, req.GodownId, req.SupplierInvoiceNo, req.InvoiceDate, req.IsInterState }, tx);
+
+            decimal basicTotal = 0, taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
+            foreach (var l in req.Lines)
+            {
+                var calc = req.IsInterState
+                    ? PurchaseInvoiceLinePricing.PriceInterStateLine(l.ThicknessMm!.Value, l.WidthCm!.Value, l.LengthCm!.Value, (int)l.NoOfCrates!.Value, (int)l.SheetsPerCrate!.Value, l.Rate)
+                    : PurchaseInvoiceLinePricing.PriceLocalLine(l.Qty!.Value, l.Rate);
+
+                decimal gstPct = l.GstPct ?? (gstByProduct.TryGetValue(l.ProductId, out var g) ? g : 18m);
+                // Insurance is applied at the header level below, once the line total is known.
+                decimal taxable = calc.BasicValue;
+                decimal tax = Math.Round(taxable * gstPct / 100m, 2);
+                decimal cgst = 0, sgst = 0, igst = 0;
+                if (req.IsInterState) igst = tax; else { cgst = Math.Round(tax / 2m, 2); sgst = tax - cgst; }
+                decimal net = taxable + cgst + sgst + igst;
+
+                basicTotal += calc.BasicValue;
+                taxableTotal += taxable;
+                cgstTotal += cgst; sgstTotal += sgst; igstTotal += igst;
+
+                conn.Execute(
+                    @"INSERT INTO Purchase.PurchaseInvoiceLine
+                        (PurchaseInvoiceId, ProductId, Description, ThicknessMm, WidthCm, LengthCm, NoOfCrates, SheetsPerCrate,
+                         Qty, Area, Rate, BasicValue, GstPct, TaxableValue, CgstAmount, SgstAmount, IgstAmount, NetValue)
+                      VALUES
+                        (@id, @ProductId, @Description, @ThicknessMm, @WidthCm, @LengthCm, @NoOfCrates, @SheetsPerCrate,
+                         @Qty, @Area, @Rate, @BasicValue, @GstPct, @TaxableValue, @CgstAmount, @SgstAmount, @IgstAmount, @NetValue)",
+                    new
+                    {
+                        id, l.ProductId, l.Description, l.ThicknessMm, l.WidthCm, l.LengthCm, l.NoOfCrates, l.SheetsPerCrate,
+                        calc.Qty, calc.Area, l.Rate, calc.BasicValue, gstPct, TaxableValue = taxable,
+                        CgstAmount = cgst, SgstAmount = sgst, IgstAmount = igst, NetValue = net,
+                    }, tx);
+
+                // Same upsert-then-movement pattern GrnController.Create uses for stock.
+                var balance = conn.QueryFirstOrDefault("SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { l.ProductId, req.GodownId }, tx);
+                if (balance is null)
+                    conn.Execute("INSERT INTO Inventory.StockBalance (ProductId, GodownId, QtyOnHand) VALUES (@ProductId, @GodownId, @Area)",
+                        new { l.ProductId, req.GodownId, calc.Area }, tx);
+                else
+                    conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand + @Area WHERE StockBalanceId = @id",
+                        new { calc.Area, id = (int)balance.StockBalanceId }, tx);
+
+                conn.Execute("INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty, Rate) VALUES (@ProductId, @GodownId, 'Purchase', 'PurchaseInvoice', @id, @Area, @Rate)",
+                    new { l.ProductId, req.GodownId, id, calc.Area, l.Rate }, tx);
+            }
+
+            decimal insuranceValue = 0;
+            if (req.IsInterState && req.InsurancePct is > 0)
+                insuranceValue = Math.Round(basicTotal * req.InsurancePct.Value / 100m, 2);
+            // Insurance itself isn't taxed on the sample invoice (IGST is computed per line before
+            // insurance is added) — it just rides along in the taxable/total figures shown below.
+
+            decimal totalBeforeRound = taxableTotal + insuranceValue + cgstTotal + sgstTotal + igstTotal;
+            decimal rounded = Math.Round(totalBeforeRound, 0, MidpointRounding.AwayFromZero);
+            decimal roundOff = rounded - totalBeforeRound;
+
+            conn.Execute(
+                @"UPDATE Purchase.PurchaseInvoice SET
+                    BasicValue = @basicTotal, InsuranceValue = @insuranceValue, TaxableValue = @taxableTotal,
+                    CgstValue = @cgstTotal, SgstValue = @sgstTotal, IgstValue = @igstTotal, RoundOff = @roundOff, TotalValue = @rounded
+                  WHERE PurchaseInvoiceId = @id",
+                new { id, basicTotal, insuranceValue, taxableTotal, cgstTotal, sgstTotal, igstTotal, roundOff, rounded }, tx);
 
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'PurchaseInvoice', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
@@ -390,31 +494,31 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         }
     }
 
-    /// <summary>Unlike the Purchase Order and GRN it derives from, a booked purchase invoice can
-    /// always be corrected — this is the "fix a wrong entry" path.</summary>
+    /// <summary>Fixes a wrong supplier reference number or date — quantities/rates/stock are not
+    /// editable here (see UpdatePurchaseInvoiceRequest); delete and re-enter for anything beyond
+    /// that, same as every other document in this app that doesn't support in-place line edits.
+    /// </summary>
     [RequirePermission("PurchaseInvoice.Edit")]
     [HttpPut("{id:int}")]
     public IActionResult Update(int id, [FromBody] UpdatePurchaseInvoiceRequest req)
     {
-        if (req.TotalValue <= 0)
-            return UnprocessableEntity(new ProblemResponse { Title = "Invalid value", Status = 422, ErrorCode = "AMOUNT_INVALID", Detail = "Invoice value must be greater than zero." });
-
         using var conn = db.CreateConnection();
         var rows = conn.Execute(
             @"UPDATE Purchase.PurchaseInvoice SET
-                SupplierInvoiceNo = @SupplierInvoiceNo, TotalValue = @TotalValue,
+                SupplierInvoiceNo = @SupplierInvoiceNo,
                 InvoiceDate = ISNULL(@InvoiceDate, InvoiceDate)
               WHERE PurchaseInvoiceId = @id",
-            new { id, req.SupplierInvoiceNo, req.TotalValue, req.InvoiceDate });
+            new { id, req.SupplierInvoiceNo, req.InvoiceDate });
         if (rows == 0) return NotFound();
 
         conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Update', 'PurchaseInvoice', @id)", new { id = id.ToString() });
         return NoContent();
     }
 
-    /// <summary>Nothing references a purchase invoice (confirmed via sys.foreign_keys — supplier
-    /// payments are a generic Finance.Voucher tied only to SupplierId), so this is always
-    /// deletable, subject to permission — same as VoucherDto.CanDelete.</summary>
+    /// <summary>Unlike the old flat-total booking, this invoice adds real stock on Create (see
+    /// above) — so deleting it must reverse exactly what it added, refusing if any of that stock
+    /// has since moved on, the same rule GrnController.Delete already enforces for the same
+    /// reason.</summary>
     [RequirePermission("PurchaseInvoice.Delete")]
     [HttpDelete("{id:int}")]
     public IActionResult Delete(int id)
@@ -426,9 +530,42 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
             var header = conn.QueryFirstOrDefault("SELECT * FROM Purchase.PurchaseInvoice WHERE PurchaseInvoiceId = @id", new { id }, tx);
             if (header is null) { tx.Rollback(); return NotFound(); }
 
+            var lines = conn.Query("SELECT * FROM Purchase.PurchaseInvoiceLine WHERE PurchaseInvoiceId = @id", new { id }, tx).ToList();
+
+            var movements = conn.Query<(int ProductId, int GodownId, decimal Qty)>(
+                "SELECT ProductId, GodownId, Qty FROM Inventory.StockMovement WHERE DocType = 'PurchaseInvoice' AND DocId = @id AND MovementType = 'Purchase'",
+                new { id }, tx).ToList();
+
+            foreach (var m in movements)
+            {
+                var qtyFree = conn.ExecuteScalar<decimal?>(
+                    "SELECT QtyOnHand FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { m.ProductId, m.GodownId }, tx) ?? 0m;
+                if (qtyFree < m.Qty)
+                {
+                    tx.Rollback();
+                    var product = conn.QueryFirstOrDefault<string>("SELECT Code FROM Master.Product WHERE ProductId = @ProductId", new { m.ProductId }, tx);
+                    return Conflict(new ProblemResponse
+                    {
+                        Title = "Stock already moved",
+                        Status = 409,
+                        ErrorCode = "PURCHASEINVOICE_STOCK_CONSUMED",
+                        Detail = $"{product ?? $"Product {m.ProductId}"}: only {qtyFree} of the {m.Qty} added by this invoice is still on hand — the rest has already been sold, transferred or adjusted. This invoice cannot be deleted.",
+                    });
+                }
+            }
+
+            foreach (var m in movements)
+            {
+                conn.Execute(
+                    "UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @Qty WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { m.Qty, m.ProductId, m.GodownId }, tx);
+            }
+            conn.Execute("DELETE FROM Inventory.StockMovement WHERE DocType = 'PurchaseInvoice' AND DocId = @id", new { id }, tx);
+            conn.Execute("DELETE FROM Purchase.PurchaseInvoiceLine WHERE PurchaseInvoiceId = @id", new { id }, tx);
             conn.Execute("DELETE FROM Purchase.PurchaseInvoice WHERE PurchaseInvoiceId = @id", new { id }, tx);
 
-            AuditLogger.LogDelete(conn, tx, User, HttpContext, "PurchaseInvoice", id.ToString(), header);
+            AuditLogger.LogDelete(conn, tx, User, HttpContext, "PurchaseInvoice", id.ToString(), new { PurchaseInvoice = header, Lines = lines, ReversedStockMovements = movements });
             tx.Commit();
             return NoContent();
         }
