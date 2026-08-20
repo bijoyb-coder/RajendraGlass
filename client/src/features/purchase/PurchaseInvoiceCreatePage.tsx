@@ -19,8 +19,12 @@ function money(n: number) {
 
 /** Mirrors QuotationCalculator's Sheet3 metre convention (server/Data/QuotationCalculator.cs) —
  * rate x thickness gives the effective per-sqm rate, exactly the "per MM" pricing an Inter-State
- * supplier invoice quotes. Local lines are the plain qty x rate a Local invoice states directly. */
-function priceLine(line: LineRow, isInterState: boolean, gstPct: number) {
+ * supplier invoice quotes. Local lines are the plain qty x rate a Local invoice states directly.
+ * insurancePct (Inter-State only) is each line's own share of insurance, taxed along with the rest
+ * of that line's value — matching PurchaseController.PriceInsertLinesAndMoveStock, which folds it
+ * into the line's taxable value (Section 15 CGST Act: incidental charges are part of the taxable
+ * transaction value), not applied as an untaxed lump sum at header level. */
+function priceLine(line: LineRow, isInterState: boolean, gstPct: number, insurancePct: number) {
   let area: number, basic: number
   if (isInterState) {
     const t = line.thicknessMm || 0, w = line.widthCm || 0, l = line.lengthCm || 0
@@ -33,8 +37,10 @@ function priceLine(line: LineRow, isInterState: boolean, gstPct: number) {
     area = line.qty || 0
     basic = area * (line.rate || 0)
   }
-  const tax = (basic * gstPct) / 100
-  return { area, basic, tax }
+  const insurance = isInterState && insurancePct ? (basic * insurancePct) / 100 : 0
+  const taxable = basic + insurance
+  const tax = (taxable * gstPct) / 100
+  return { area, basic, insurance, taxable, tax }
 }
 
 export default function PurchaseInvoiceCreatePage() {
@@ -73,13 +79,13 @@ export default function PurchaseInvoiceCreatePage() {
   }
 
   const totals = useMemo(() => {
-    let basic = 0, tax = 0
+    let basic = 0, insurance = 0, tax = 0
     for (const l of lines) {
-      const p = priceLine(l, isInterState, gstFor(l))
+      const p = priceLine(l, isInterState, gstFor(l), Number(insurancePct) || 0)
       basic += p.basic
+      insurance += p.insurance
       tax += p.tax
     }
-    const insurance = isInterState && insurancePct ? (basic * Number(insurancePct)) / 100 : 0
     const taxable = basic + insurance
     const total = Math.round(taxable + tax)
     return { basic, insurance, taxable, tax, total }
@@ -209,7 +215,7 @@ export default function PurchaseInvoiceCreatePage() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {lines.map((line) => {
-                  const { basic } = priceLine(line, isInterState, gstFor(line))
+                  const { basic } = priceLine(line, isInterState, gstFor(line), Number(insurancePct) || 0)
                   return (
                     <tr key={line.key}>
                       <td className="px-4 py-2">

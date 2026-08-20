@@ -21,9 +21,11 @@ function emptyLine(): LineRow {
 
 /** Same convention PurchaseInvoiceCreatePage uses: rate x thickness gives the effective per-sqm
  * rate for Inter-State lines; Local lines are the plain qty x rate a Local invoice states directly.
- * Duplicated here (not shared) because it's the client-side live-preview mirror of the server's
- * authoritative PurchaseInvoiceLinePricing — same reasoning Create's own copy documents. */
-function priceLine(line: LineRow, isInterState: boolean, gstPct: number) {
+ * insurancePct (Inter-State only) is each line's own share of insurance, taxed along with the rest
+ * of that line's value, matching PurchaseController.PriceInsertLinesAndMoveStock. Duplicated here
+ * (not shared) because it's the client-side live-preview mirror of the server's authoritative
+ * PurchaseInvoiceLinePricing — same reasoning Create's own copy documents. */
+function priceLine(line: LineRow, isInterState: boolean, gstPct: number, insurancePct: number) {
   let area: number, basic: number
   if (isInterState) {
     const t = line.thicknessMm || 0, w = line.widthCm || 0, l = line.lengthCm || 0
@@ -36,8 +38,10 @@ function priceLine(line: LineRow, isInterState: boolean, gstPct: number) {
     area = line.qty || 0
     basic = area * (line.rate || 0)
   }
-  const tax = (basic * gstPct) / 100
-  return { area, basic, tax }
+  const insurance = isInterState && insurancePct ? (basic * insurancePct) / 100 : 0
+  const taxable = basic + insurance
+  const tax = (taxable * gstPct) / 100
+  return { area, basic, insurance, taxable, tax }
 }
 
 /** Purchase Invoice — entered directly from the supplier's paper tax invoice (Local or
@@ -215,7 +219,7 @@ export default function PurchaseInvoiceViewPage() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {lines.map((line) => {
-                    const { basic } = priceLine(line, pi.isInterState, gstFor(line))
+                    const { basic } = priceLine(line, pi.isInterState, gstFor(line), Number(form.insurancePct) || 0)
                     return (
                       <tr key={line.key}>
                         <td className="px-4 py-2">

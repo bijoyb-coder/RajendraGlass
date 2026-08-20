@@ -520,24 +520,19 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
             if (req.EwayBillId.HasValue)
                 conn.Execute("UPDATE Purchase.EwayBill SET IsUsed = 1 WHERE EwayBillId = @EwayBillId", new { req.EwayBillId }, tx);
 
-            var totals = PriceInsertLinesAndMoveStock(conn, tx, id, req.IsInterState, godownId, req.Lines);
+            decimal createInsurancePct = req.IsInterState ? (req.InsurancePct ?? 0) : 0;
+            var totals = PriceInsertLinesAndMoveStock(conn, tx, id, req.IsInterState, godownId, req.Lines, createInsurancePct);
 
-            decimal insuranceValue = 0;
-            if (req.IsInterState && req.InsurancePct is > 0)
-                insuranceValue = Math.Round(totals.BasicTotal * req.InsurancePct.Value / 100m, 2);
-            // Insurance itself isn't taxed on the sample invoice (IGST is computed per line before
-            // insurance is added) — it just rides along in the taxable/total figures shown below.
-
-            decimal totalBeforeRound = totals.TaxableTotal + insuranceValue + totals.CgstTotal + totals.SgstTotal + totals.IgstTotal;
+            decimal totalBeforeRound = totals.TaxableTotal + totals.CgstTotal + totals.SgstTotal + totals.IgstTotal;
             decimal rounded = Math.Round(totalBeforeRound, 0, MidpointRounding.AwayFromZero);
             decimal roundOff = rounded - totalBeforeRound;
 
             conn.Execute(
                 @"UPDATE Purchase.PurchaseInvoice SET
-                    BasicValue = @BasicTotal, InsuranceValue = @insuranceValue, TaxableValue = @TaxableTotal,
+                    BasicValue = @BasicTotal, InsuranceValue = @InsuranceTotal, TaxableValue = @TaxableTotal,
                     CgstValue = @CgstTotal, SgstValue = @SgstTotal, IgstValue = @IgstTotal, RoundOff = @roundOff, TotalValue = @rounded
                   WHERE PurchaseInvoiceId = @id",
-                new { id, totals.BasicTotal, insuranceValue, totals.TaxableTotal, totals.CgstTotal, totals.SgstTotal, totals.IgstTotal, roundOff, rounded }, tx);
+                new { id, totals.BasicTotal, totals.InsuranceTotal, totals.TaxableTotal, totals.CgstTotal, totals.SgstTotal, totals.IgstTotal, roundOff, rounded }, tx);
 
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'PurchaseInvoice', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
@@ -581,15 +576,20 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
     /// inserts the PurchaseInvoiceLine rows, and moves stock for each — the exact upsert-then-
     /// movement pattern GrnController.Create uses. Shared by Create and Update (the line-edit path)
     /// so the two can never drift apart.</summary>
-    private static (decimal BasicTotal, decimal TaxableTotal, decimal CgstTotal, decimal SgstTotal, decimal IgstTotal) PriceInsertLinesAndMoveStock(
-        System.Data.IDbConnection conn, System.Data.IDbTransaction tx, int invoiceId, bool isInterState, int godownId, List<CreatePurchaseInvoiceLineRequest> lines)
+    /// <param name="insurancePct">Inter-State only; ignored for Local lines. Per Section 15 of the
+    /// CGST Act, incidental charges like insurance are part of the taxable transaction value — so
+    /// each line's own insurance share (BasicValue * insurancePct) is added to *that line's*
+    /// taxable value before its IGST is computed, not applied as a separate untaxed lump sum at
+    /// header level.</param>
+    private static (decimal BasicTotal, decimal InsuranceTotal, decimal TaxableTotal, decimal CgstTotal, decimal SgstTotal, decimal IgstTotal) PriceInsertLinesAndMoveStock(
+        System.Data.IDbConnection conn, System.Data.IDbTransaction tx, int invoiceId, bool isInterState, int godownId, List<CreatePurchaseInvoiceLineRequest> lines, decimal insurancePct)
     {
         var productIds = lines.Select(l => l.ProductId).Distinct().ToArray();
         var gstByProduct = conn.Query<(int ProductId, decimal GstRatePct)>(
             "SELECT ProductId, GstRatePct FROM Master.Product WHERE ProductId IN @ids", new { ids = productIds }, tx)
             .ToDictionary(r => r.ProductId, r => r.GstRatePct);
 
-        decimal basicTotal = 0, taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
+        decimal basicTotal = 0, insuranceTotal = 0, taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
         foreach (var l in lines)
         {
             var calc = isInterState
@@ -597,14 +597,15 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                 : PurchaseInvoiceLinePricing.PriceLocalLine(l.Qty!.Value, l.Rate);
 
             decimal gstPct = l.GstPct ?? (gstByProduct.TryGetValue(l.ProductId, out var g) ? g : 18m);
-            // Insurance is applied at the header level by the caller, once the line total is known.
-            decimal taxable = calc.BasicValue;
+            decimal lineInsurance = isInterState && insurancePct > 0 ? Math.Round(calc.BasicValue * insurancePct / 100m, 2) : 0;
+            decimal taxable = calc.BasicValue + lineInsurance;
             decimal tax = Math.Round(taxable * gstPct / 100m, 2);
             decimal cgst = 0, sgst = 0, igst = 0;
             if (isInterState) igst = tax; else { cgst = Math.Round(tax / 2m, 2); sgst = tax - cgst; }
             decimal net = taxable + cgst + sgst + igst;
 
             basicTotal += calc.BasicValue;
+            insuranceTotal += lineInsurance;
             taxableTotal += taxable;
             cgstTotal += cgst; sgstTotal += sgst; igstTotal += igst;
 
@@ -635,7 +636,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
             conn.Execute("INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty, Rate) VALUES (@ProductId, @godownId, 'Purchase', 'PurchaseInvoice', @invoiceId, @Area, @Rate)",
                 new { l.ProductId, godownId, invoiceId, calc.Area, l.Rate }, tx);
         }
-        return (basicTotal, taxableTotal, cgstTotal, sgstTotal, igstTotal);
+        return (basicTotal, insuranceTotal, taxableTotal, cgstTotal, sgstTotal, igstTotal);
     }
 
     /// <summary>Reverses the stock this invoice's lines added so far, refusing with 409 if any of
@@ -705,29 +706,29 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                 var reverseResult = ReverseStockMovements(conn, tx, id);
                 if (reverseResult is not null) { tx.Rollback(); return reverseResult; }
 
-                int godownId = (int)current.GodownId;
-                var totals = PriceInsertLinesAndMoveStock(conn, tx, id, isInterState, godownId, req.Lines);
-
                 // Preserve whatever insurance % this invoice was booked with (InsuranceValue /
                 // BasicValue, both from before the lines were touched) unless the caller sends an
                 // explicit override — so re-editing lines without mentioning insurance doesn't
-                // silently zero it out.
+                // silently zero it out. Computed from the pre-edit snapshot, since it now feeds
+                // into pricing the new lines rather than being derived from their totals.
                 decimal oldBasicValue = (decimal)current.BasicValue;
                 decimal oldInsuranceValue = (decimal)current.InsuranceValue;
                 decimal impliedInsurancePct = oldBasicValue > 0 ? oldInsuranceValue / oldBasicValue * 100m : 0m;
-                decimal insurancePct = req.InsurancePct ?? impliedInsurancePct;
-                decimal insuranceValue = isInterState && insurancePct > 0 ? Math.Round(totals.BasicTotal * insurancePct / 100m, 2) : 0;
+                decimal insurancePct = isInterState ? (req.InsurancePct ?? impliedInsurancePct) : 0;
 
-                decimal totalBeforeRound = totals.TaxableTotal + insuranceValue + totals.CgstTotal + totals.SgstTotal + totals.IgstTotal;
+                int godownId = (int)current.GodownId;
+                var totals = PriceInsertLinesAndMoveStock(conn, tx, id, isInterState, godownId, req.Lines, insurancePct);
+
+                decimal totalBeforeRound = totals.TaxableTotal + totals.CgstTotal + totals.SgstTotal + totals.IgstTotal;
                 decimal rounded = Math.Round(totalBeforeRound, 0, MidpointRounding.AwayFromZero);
                 decimal roundOff = rounded - totalBeforeRound;
 
                 conn.Execute(
                     @"UPDATE Purchase.PurchaseInvoice SET
-                        BasicValue = @BasicTotal, InsuranceValue = @insuranceValue, TaxableValue = @TaxableTotal,
+                        BasicValue = @BasicTotal, InsuranceValue = @InsuranceTotal, TaxableValue = @TaxableTotal,
                         CgstValue = @CgstTotal, SgstValue = @SgstTotal, IgstValue = @IgstTotal, RoundOff = @roundOff, TotalValue = @rounded
                       WHERE PurchaseInvoiceId = @id",
-                    new { id, totals.BasicTotal, insuranceValue, totals.TaxableTotal, totals.CgstTotal, totals.SgstTotal, totals.IgstTotal, roundOff, rounded }, tx);
+                    new { id, totals.BasicTotal, totals.InsuranceTotal, totals.TaxableTotal, totals.CgstTotal, totals.SgstTotal, totals.IgstTotal, roundOff, rounded }, tx);
             }
 
             // Only touch the e-Way Bill link if the caller actually sent something -- either a new
