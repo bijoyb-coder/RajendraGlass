@@ -98,7 +98,7 @@ export default function EwayBillsPage() {
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 grid sm:grid-cols-3 gap-4 animate-fade-in">
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">e-Way Bill No. *</label>
-            <input required value={form.ewayBillNo ?? ''} onChange={(e) => set('ewayBillNo', e.target.value)} className={inputClass} placeholder="e.g. 891723097167" />
+            <input required maxLength={30} value={form.ewayBillNo ?? ''} onChange={(e) => set('ewayBillNo', e.target.value)} className={inputClass} placeholder="e.g. 891723097167" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Supplier *</label>
@@ -117,11 +117,11 @@ export default function EwayBillsPage() {
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Vehicle No.</label>
-            <input value={form.vehicleNo ?? ''} onChange={(e) => set('vehicleNo', e.target.value)} className={inputClass} placeholder="e.g. WB11D1799" />
+            <input maxLength={50} value={form.vehicleNo ?? ''} onChange={(e) => set('vehicleNo', e.target.value)} className={inputClass} placeholder="e.g. WB11D1799" />
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Document No.</label>
-            <input value={form.documentNo ?? ''} onChange={(e) => set('documentNo', e.target.value)} className={inputClass} placeholder="Supplier's invoice/document no." />
+            <input maxLength={50} value={form.documentNo ?? ''} onChange={(e) => set('documentNo', e.target.value)} className={inputClass} placeholder="Supplier's invoice/document no." />
           </div>
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Value of Goods</label>
