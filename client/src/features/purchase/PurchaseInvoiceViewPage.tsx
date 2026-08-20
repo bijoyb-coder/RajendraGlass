@@ -304,6 +304,7 @@ export default function PurchaseInvoiceViewPage() {
                   </>
                 )}
                 <th className="py-2 font-medium text-right">Basic Value</th>
+                <th className="py-2 font-medium text-right print:hidden">IGST</th>
                 <th className="py-2 font-medium text-right">Net Value</th>
               </tr>
             </thead>
@@ -329,6 +330,7 @@ export default function PurchaseInvoiceViewPage() {
                     </>
                   )}
                   <td className="py-2.5 text-right">{money(l.basicValue)}</td>
+                  <td className="py-2.5 text-right text-slate-500 print:hidden">{money(l.igstAmount)}</td>
                   <td className="py-2.5 text-right font-medium">{money(l.netValue)}</td>
                 </tr>
               ))}
