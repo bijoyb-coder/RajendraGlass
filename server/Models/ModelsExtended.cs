@@ -366,6 +366,10 @@ public class PurchaseInvoiceDto
     public string? GodownName { get; set; }
     public string? SupplierInvoiceNo { get; set; }
     public DateTime InvoiceDate { get; set; }
+    /// <summary>The supplier's own e-Way Bill number for this shipment — a plain reference field
+    /// entered off their paper invoice, not generated via any gateway (unlike Dispatch.Waybill's
+    /// outbound e-Way Bill, which this app does generate).</summary>
+    public string? EwayBillNo { get; set; }
     /// <summary>Drives which line layout and tax split (CGST+SGST vs IGST) this invoice uses.</summary>
     public bool IsInterState { get; set; }
     public decimal BasicValue { get; set; }
@@ -415,17 +419,19 @@ public class CreatePurchaseInvoiceRequest
     public int? GrnId { get; set; }
     public string? SupplierInvoiceNo { get; set; }
     public DateTime? InvoiceDate { get; set; }
+    public string? EwayBillNo { get; set; }
     /// <summary>Inter-State only; ignored for Local invoices.</summary>
     public decimal? InsurancePct { get; set; }
     public List<CreatePurchaseInvoiceLineRequest> Lines { get; set; } = new();
 }
 
-/// <summary>Fixes a wrong supplier reference number or date on an already-booked purchase
-/// invoice — quantities/rates/stock are not editable here (they'd need their own stock
+/// <summary>Fixes a wrong supplier reference number, e-Way Bill number or date on an already-booked
+/// purchase invoice — quantities/rates/stock are not editable here (they'd need their own stock
 /// reconciliation); delete and re-enter for anything beyond that.</summary>
 public class UpdatePurchaseInvoiceRequest
 {
     public string? SupplierInvoiceNo { get; set; }
+    public string? EwayBillNo { get; set; }
     public DateTime? InvoiceDate { get; set; }
 }
 

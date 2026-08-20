@@ -19,12 +19,12 @@ export default function PurchaseInvoiceViewPage() {
   const [updateInvoice, { isLoading: saving }] = useUpdatePurchaseInvoiceMutation()
 
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState({ supplierInvoiceNo: '', invoiceDate: '' })
+  const [form, setForm] = useState({ supplierInvoiceNo: '', ewayBillNo: '', invoiceDate: '' })
   const [error, setError] = useState<string | null>(null)
 
   function openEdit() {
     if (!pi) return
-    setForm({ supplierInvoiceNo: pi.supplierInvoiceNo ?? '', invoiceDate: pi.invoiceDate.slice(0, 10) })
+    setForm({ supplierInvoiceNo: pi.supplierInvoiceNo ?? '', ewayBillNo: pi.ewayBillNo ?? '', invoiceDate: pi.invoiceDate.slice(0, 10) })
     setError(null)
     setEditing(true)
   }
@@ -35,7 +35,7 @@ export default function PurchaseInvoiceViewPage() {
     try {
       await updateInvoice({
         id: Number(id),
-        body: { supplierInvoiceNo: form.supplierInvoiceNo || undefined, invoiceDate: form.invoiceDate },
+        body: { supplierInvoiceNo: form.supplierInvoiceNo || undefined, ewayBillNo: form.ewayBillNo || undefined, invoiceDate: form.invoiceDate },
       }).unwrap()
       setEditing(false)
     } catch (err: any) {
@@ -77,17 +77,21 @@ export default function PurchaseInvoiceViewPage() {
       </div>
 
       {editing && (
-        <form onSubmit={handleSubmit} className="no-print bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4 grid sm:grid-cols-2 gap-4 animate-fade-in">
+        <form onSubmit={handleSubmit} className="no-print bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4 grid sm:grid-cols-3 gap-4 animate-fade-in">
           <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Supplier Invoice No.</label>
             <input value={form.supplierInvoiceNo} onChange={(e) => setForm((f) => ({ ...f, supplierInvoiceNo: e.target.value }))} className={inputClass} />
           </div>
           <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">e-Way Bill No.</label>
+            <input value={form.ewayBillNo} onChange={(e) => setForm((f) => ({ ...f, ewayBillNo: e.target.value }))} className={inputClass} />
+          </div>
+          <div>
             <label className="block text-xs font-semibold text-slate-600 mb-1">Invoice Date *</label>
             <input type="date" required max={new Date().toISOString().slice(0, 10)} value={form.invoiceDate} onChange={(e) => setForm((f) => ({ ...f, invoiceDate: e.target.value }))} className={inputClass} />
           </div>
-          {error && <div className="sm:col-span-2 text-sm text-red-600">{error}</div>}
-          <div className="sm:col-span-2 flex justify-end">
+          {error && <div className="sm:col-span-3 text-sm text-red-600">{error}</div>}
+          <div className="sm:col-span-3 flex justify-end">
             <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">
               {saving ? 'Saving…' : 'Save Changes'}
             </button>
@@ -109,6 +113,7 @@ export default function PurchaseInvoiceViewPage() {
           <Detail label="Invoice Date" value={new Date(pi.invoiceDate).toLocaleDateString('en-IN')} />
           <Detail label="Supplier" value={pi.supplierName ?? '—'} />
           <Detail label="Supplier Invoice No." value={pi.supplierInvoiceNo ?? '—'} />
+          <Detail label="e-Way Bill No." value={pi.ewayBillNo ?? '—'} />
           <Detail label="Godown" value={pi.godownName ?? '—'} />
           <Detail label="Type" value={pi.isInterState ? 'Inter-State' : 'Local'} />
           <Detail label="Against PO" value={pi.poNo ?? '—'} />
