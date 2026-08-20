@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Plus, X, Layers } from 'lucide-react'
+import { Plus, X, Layers, Printer } from 'lucide-react'
 import { useCreateProductMutation, useListProductsQuery } from './mastersApi'
 import {
   useDataGrid,
@@ -8,6 +8,8 @@ import {
   Th,
   DataGridSearchBar,
   DataGridPagination,
+  DataGridButton,
+  printReport,
   DATA_GRID_HEAD_ROW_CLASS,
   DATA_GRID_ROW_CLASS,
 } from '../../components/DataGrid'
@@ -27,6 +29,7 @@ export default function ProductsPage() {
 
   const {
     rows,
+    allRows,
     search,
     setSearch,
     sortKey,
@@ -59,6 +62,29 @@ export default function ProductsPage() {
 
   function set<K extends keyof ProductDto>(key: K, value: ProductDto[K]) {
     setForm((f) => ({ ...f, [key]: value }))
+  }
+
+  /** Every master field, not just the compact set shown on screen — matches the current
+   * search/sort but ignores pagination, same as every other list's Print button. */
+  function printProducts() {
+    printReport({
+      title: 'Products',
+      subtitle: search ? `Filtered by "${search}"` : undefined,
+      columns: [
+        { label: 'Code' }, { label: 'Description' }, { label: 'Category' }, { label: 'Brand' },
+        { label: 'Thickness (mm)', align: 'right' }, { label: 'Colour' }, { label: 'HSN Code' },
+        { label: 'GST %', align: 'right' }, { label: 'Stock Unit' }, { label: 'Selling Unit' },
+        { label: 'Purchase Rate', align: 'right' }, { label: 'Selling Rate', align: 'right' },
+        { label: 'Min Selling Price', align: 'right' }, { label: 'Status' },
+      ],
+      rows: allRows.map((p) => [
+        p.code, p.description, p.category || '—', p.brand || '—',
+        p.thicknessMm ?? '—', p.colour || '—', p.hsnCode || '—',
+        p.gstRatePct, p.stockUnit, p.sellingUnit,
+        p.purchaseRate ?? '—', p.sellingRate ?? '—',
+        p.minSellingPrice ?? '—', p.isActive ? 'Active' : 'Inactive',
+      ]),
+    })
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -113,6 +139,7 @@ export default function ProductsPage() {
           placeholder="Search code, description, category, brand or colour…"
           pageSize={pageSize}
           onPageSizeChange={setPageSize}
+          rightSlot={<DataGridButton onClick={printProducts} title="Print the full product list, every column"><Printer size={15} /> Print</DataGridButton>}
         />
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
