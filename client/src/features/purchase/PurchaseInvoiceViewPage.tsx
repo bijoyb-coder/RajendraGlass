@@ -1,41 +1,108 @@
 import { useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Printer, ArrowLeft, Pencil, X } from 'lucide-react'
+import { Printer, ArrowLeft, Pencil, X, Plus, Trash2 } from 'lucide-react'
 import { useGetPurchaseInvoiceQuery, useUpdatePurchaseInvoiceMutation, useListEwayBillsQuery } from './purchaseApi'
+import { useListProductsQuery } from '../masters/mastersApi'
 import Logo from '../../components/Logo'
+import type { CreatePurchaseInvoiceLineRequest } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
 function money(n: number) {
   return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 }
 
+interface LineRow extends CreatePurchaseInvoiceLineRequest {
+  key: string
+}
+
+function emptyLine(): LineRow {
+  return { key: crypto.randomUUID(), productId: 0, rate: 0 }
+}
+
+/** Same convention PurchaseInvoiceCreatePage uses: rate x thickness gives the effective per-sqm
+ * rate for Inter-State lines; Local lines are the plain qty x rate a Local invoice states directly.
+ * Duplicated here (not shared) because it's the client-side live-preview mirror of the server's
+ * authoritative PurchaseInvoiceLinePricing — same reasoning Create's own copy documents. */
+function priceLine(line: LineRow, isInterState: boolean, gstPct: number) {
+  let area: number, basic: number
+  if (isInterState) {
+    const t = line.thicknessMm || 0, w = line.widthCm || 0, l = line.lengthCm || 0
+    const crates = line.noOfCrates || 0, sheets = line.sheetsPerCrate || 0
+    const qty = crates * sheets
+    const perPieceArea = (l / 100) * (w / 100)
+    area = perPieceArea * qty
+    basic = area * t * (line.rate || 0)
+  } else {
+    area = line.qty || 0
+    basic = area * (line.rate || 0)
+  }
+  const tax = (basic * gstPct) / 100
+  return { area, basic, tax }
+}
+
 /** Purchase Invoice — entered directly from the supplier's paper tax invoice (Local or
- * Inter-State), stock added on save. Quantities/rates aren't editable after the fact (they'd need
- * their own stock reconciliation); only the supplier reference number and date can be fixed here. */
+ * Inter-State), stock added on save. Editing the lines reverses the stock this invoice added and
+ * re-applies it for the new lines (refused if any of it has already moved on elsewhere) — the
+ * Local/Inter-State mode itself is fixed and can't be changed here. */
 export default function PurchaseInvoiceViewPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { data: pi, isLoading } = useGetPurchaseInvoiceQuery(Number(id))
   const [updateInvoice, { isLoading: saving }] = useUpdatePurchaseInvoiceMutation()
+  const { data: products } = useListProductsQuery()
   // This invoice's own supplier's e-Way Bills — including the one already linked to it (which is
   // otherwise "used" and would be hidden by an availableOnly filter).
   const { data: ewayBills } = useListEwayBillsQuery(pi ? { supplierId: pi.supplierId } : undefined, { skip: !pi })
   const selectableEwayBills = ewayBills?.items.filter((eb) => !eb.isUsed || eb.ewayBillId === pi?.ewayBillId) ?? []
 
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState<{ supplierInvoiceNo: string; ewayBillId: number | ''; invoiceDate: string }>({ supplierInvoiceNo: '', ewayBillId: '', invoiceDate: '' })
+  const [form, setForm] = useState<{ supplierInvoiceNo: string; ewayBillId: number | ''; invoiceDate: string; insurancePct: number | '' }>({ supplierInvoiceNo: '', ewayBillId: '', invoiceDate: '', insurancePct: '' })
+  const [lines, setLines] = useState<LineRow[]>([])
   const [error, setError] = useState<string | null>(null)
 
   function openEdit() {
     if (!pi) return
-    setForm({ supplierInvoiceNo: pi.supplierInvoiceNo ?? '', ewayBillId: pi.ewayBillId ?? '', invoiceDate: pi.invoiceDate.slice(0, 10) })
+    const impliedInsurancePct = pi.basicValue > 0 ? Number(((pi.insuranceValue / pi.basicValue) * 100).toFixed(3)) : 0
+    setForm({
+      supplierInvoiceNo: pi.supplierInvoiceNo ?? '',
+      ewayBillId: pi.ewayBillId ?? '',
+      invoiceDate: pi.invoiceDate.slice(0, 10),
+      insurancePct: pi.isInterState && impliedInsurancePct > 0 ? impliedInsurancePct : '',
+    })
+    setLines(pi.lines.map((l) => ({
+      key: crypto.randomUUID(), productId: l.productId, description: l.description ?? undefined,
+      thicknessMm: l.thicknessMm ?? undefined, widthCm: l.widthCm ?? undefined, lengthCm: l.lengthCm ?? undefined,
+      noOfCrates: l.noOfCrates ?? undefined, sheetsPerCrate: l.sheetsPerCrate ?? undefined,
+      qty: l.qty, rate: l.rate, gstPct: l.gstPct,
+    })))
     setError(null)
     setEditing(true)
+  }
+
+  function addLine() { setLines((prev) => [...prev, emptyLine()]) }
+  function removeLine(key: string) { setLines((prev) => prev.filter((l) => l.key !== key)) }
+  function updateLine(key: string, patch: Partial<LineRow>) { setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l))) }
+
+  function onProductChange(key: string, productId: number) {
+    const product = products?.items.find((p) => p.productId === productId)
+    updateLine(key, { productId, rate: product?.purchaseRate ?? 0 })
+  }
+
+  function gstFor(line: LineRow) {
+    return line.gstPct ?? products?.items.find((p) => p.productId === line.productId)?.gstRatePct ?? 18
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
+    if (!pi) return
+
+    const isInterState = pi.isInterState
+    const validLines = lines.filter((l) => l.productId && l.rate > 0 && (isInterState
+      ? l.thicknessMm && l.widthCm && l.lengthCm && l.noOfCrates && l.sheetsPerCrate
+      : l.qty && l.qty > 0))
+    if (validLines.length === 0) { setError('Add at least one valid line item — every field for this invoice\'s type is required.'); return }
+
     try {
       await updateInvoice({
         id: Number(id),
@@ -44,6 +111,10 @@ export default function PurchaseInvoiceViewPage() {
           ewayBillId: form.ewayBillId ? Number(form.ewayBillId) : undefined,
           clearEwayBill: !form.ewayBillId,
           invoiceDate: form.invoiceDate,
+          insurancePct: isInterState ? Number(form.insurancePct) || 0 : undefined,
+          lines: validLines.map((l) => (isInterState
+            ? { productId: l.productId, description: l.description, thicknessMm: l.thicknessMm, widthCm: l.widthCm, lengthCm: l.lengthCm, noOfCrates: l.noOfCrates, sheetsPerCrate: l.sheetsPerCrate, rate: l.rate, gstPct: l.gstPct }
+            : { productId: l.productId, description: l.description, qty: l.qty, rate: l.rate, gstPct: l.gstPct })),
         },
       }).unwrap()
       setEditing(false)
@@ -86,24 +157,104 @@ export default function PurchaseInvoiceViewPage() {
       </div>
 
       {editing && (
-        <form onSubmit={handleSubmit} className="no-print bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4 grid sm:grid-cols-3 gap-4 animate-fade-in">
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Supplier Invoice No.</label>
-            <input value={form.supplierInvoiceNo} onChange={(e) => setForm((f) => ({ ...f, supplierInvoiceNo: e.target.value }))} className={inputClass} />
+        <form onSubmit={handleSubmit} className="no-print bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-4 space-y-4 animate-fade-in">
+          <div className="grid sm:grid-cols-3 lg:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Supplier Invoice No.</label>
+              <input value={form.supplierInvoiceNo} onChange={(e) => setForm((f) => ({ ...f, supplierInvoiceNo: e.target.value }))} className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">e-Way Bill No.</label>
+              <select value={form.ewayBillId} onChange={(e) => setForm((f) => ({ ...f, ewayBillId: e.target.value ? Number(e.target.value) : '' }))} className={inputClass}>
+                <option value="">No e-Way Bill</option>
+                {selectableEwayBills.map((eb) => <option key={eb.ewayBillId} value={eb.ewayBillId}>{eb.ewayBillNo} {eb.vehicleNo ? `— ${eb.vehicleNo}` : ''}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Invoice Date *</label>
+              <input type="date" required max={new Date().toISOString().slice(0, 10)} value={form.invoiceDate} onChange={(e) => setForm((f) => ({ ...f, invoiceDate: e.target.value }))} className={inputClass} />
+            </div>
+            {pi.isInterState && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Insurance %</label>
+                <input type="number" min={0} step="0.001" value={form.insurancePct} onChange={(e) => setForm((f) => ({ ...f, insurancePct: e.target.value ? Number(e.target.value) : '' }))} className={inputClass} placeholder="e.g. 0.323" />
+              </div>
+            )}
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">e-Way Bill No.</label>
-            <select value={form.ewayBillId} onChange={(e) => setForm((f) => ({ ...f, ewayBillId: e.target.value ? Number(e.target.value) : '' }))} className={inputClass}>
-              <option value="">No e-Way Bill</option>
-              {selectableEwayBills.map((eb) => <option key={eb.ewayBillId} value={eb.ewayBillId}>{eb.ewayBillNo} {eb.vehicleNo ? `— ${eb.vehicleNo}` : ''}</option>)}
-            </select>
+
+          <div className="border border-slate-200 rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+              <h3 className="text-sm font-semibold text-slate-700">Line Items</h3>
+              <button type="button" onClick={addLine} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
+                <Plus size={15} /> Add Line
+              </button>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                    <th className="px-4 py-2.5 font-medium min-w-[200px]">Product</th>
+                    {pi.isInterState ? (
+                      <>
+                        <th className="px-4 py-2.5 font-medium w-24">Thick (mm)</th>
+                        <th className="px-4 py-2.5 font-medium w-24">Width (cm)</th>
+                        <th className="px-4 py-2.5 font-medium w-24">Length (cm)</th>
+                        <th className="px-4 py-2.5 font-medium w-24">No. Crates</th>
+                        <th className="px-4 py-2.5 font-medium w-24">Sheets/Crate</th>
+                        <th className="px-4 py-2.5 font-medium w-28">Rate (per mm)</th>
+                      </>
+                    ) : (
+                      <>
+                        <th className="px-4 py-2.5 font-medium w-32">Qty (sqm)</th>
+                        <th className="px-4 py-2.5 font-medium w-28">Rate</th>
+                      </>
+                    )}
+                    <th className="px-4 py-2.5 font-medium w-32 text-right">Value</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {lines.map((line) => {
+                    const { basic } = priceLine(line, pi.isInterState, gstFor(line))
+                    return (
+                      <tr key={line.key}>
+                        <td className="px-4 py-2">
+                          <select value={line.productId || ''} onChange={(e) => onProductChange(line.key, Number(e.target.value))} className={inputClass}>
+                            <option value="">Select product…</option>
+                            {products?.items.map((p) => <option key={p.productId} value={p.productId}>{p.code} — {p.description}</option>)}
+                          </select>
+                        </td>
+                        {pi.isInterState ? (
+                          <>
+                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.thicknessMm ?? ''} onChange={(e) => updateLine(line.key, { thicknessMm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.widthCm ?? ''} onChange={(e) => updateLine(line.key, { widthCm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.lengthCm ?? ''} onChange={(e) => updateLine(line.key, { lengthCm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                            <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.noOfCrates ?? ''} onChange={(e) => updateLine(line.key, { noOfCrates: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                            <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.sheetsPerCrate ?? ''} onChange={(e) => updateLine(line.key, { sheetsPerCrate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
+                          </>
+                        ) : (
+                          <>
+                            <td className="px-4 py-2"><input type="number" min={0} step="0.0001" value={line.qty ?? ''} onChange={(e) => updateLine(line.key, { qty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
+                          </>
+                        )}
+                        <td className="px-4 py-2 text-right font-medium text-slate-700">{money(basic)}</td>
+                        <td className="px-2">
+                          <button type="button" onClick={() => removeLine(line.key)} className="text-slate-400 hover:text-red-500 transition">
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Invoice Date *</label>
-            <input type="date" required max={new Date().toISOString().slice(0, 10)} value={form.invoiceDate} onChange={(e) => setForm((f) => ({ ...f, invoiceDate: e.target.value }))} className={inputClass} />
-          </div>
-          {error && <div className="sm:col-span-3 text-sm text-red-600">{error}</div>}
-          <div className="sm:col-span-3 flex justify-end">
+
+          {error && <div className="text-sm text-red-600">{error}</div>}
+          <div className="flex justify-end">
             <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">
               {saving ? 'Saving…' : 'Save Changes'}
             </button>
