@@ -333,7 +333,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
     private const string ListColumns =
         @"pi.PurchaseInvoiceId, pi.InvoiceNo, pi.SupplierId, s.Name AS SupplierName,
           pi.PurchaseOrderId, po.PoNo, pi.GrnId, g.GrnNo, pi.GodownId, gd.Name AS GodownName,
-          pi.SupplierInvoiceNo, pi.InvoiceDate, pi.IsInterState,
+          pi.SupplierInvoiceNo, pi.InvoiceDate, pi.EwayBillNo, pi.IsInterState,
           pi.BasicValue, pi.InsuranceValue, pi.TaxableValue, pi.CgstValue, pi.SgstValue, pi.IgstValue, pi.RoundOff, pi.TotalValue, pi.Status
           FROM Purchase.PurchaseInvoice pi
           LEFT JOIN Master.Supplier s ON s.SupplierId = pi.SupplierId
@@ -428,10 +428,10 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
 
             var id = conn.ExecuteScalar<int>(
                 @"INSERT INTO Purchase.PurchaseInvoice
-                    (InvoiceNo, SupplierId, PurchaseOrderId, GrnId, GodownId, SupplierInvoiceNo, InvoiceDate, IsInterState, Status)
+                    (InvoiceNo, SupplierId, PurchaseOrderId, GrnId, GodownId, SupplierInvoiceNo, InvoiceDate, EwayBillNo, IsInterState, Status)
                   OUTPUT INSERTED.PurchaseInvoiceId
-                  VALUES (@invoiceNo, @SupplierId, @PurchaseOrderId, @GrnId, @godownId, @SupplierInvoiceNo, ISNULL(@InvoiceDate, CAST(SYSUTCDATETIME() AS DATE)), @IsInterState, 'Booked')",
-                new { invoiceNo, req.SupplierId, req.PurchaseOrderId, req.GrnId, godownId, req.SupplierInvoiceNo, req.InvoiceDate, req.IsInterState }, tx);
+                  VALUES (@invoiceNo, @SupplierId, @PurchaseOrderId, @GrnId, @godownId, @SupplierInvoiceNo, ISNULL(@InvoiceDate, CAST(SYSUTCDATETIME() AS DATE)), @EwayBillNo, @IsInterState, 'Booked')",
+                new { invoiceNo, req.SupplierId, req.PurchaseOrderId, req.GrnId, godownId, req.SupplierInvoiceNo, req.InvoiceDate, req.EwayBillNo, req.IsInterState }, tx);
 
             decimal basicTotal = 0, taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
             foreach (var l in req.Lines)
@@ -508,10 +508,10 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         }
     }
 
-    /// <summary>Fixes a wrong supplier reference number or date — quantities/rates/stock are not
-    /// editable here (see UpdatePurchaseInvoiceRequest); delete and re-enter for anything beyond
-    /// that, same as every other document in this app that doesn't support in-place line edits.
-    /// </summary>
+    /// <summary>Fixes a wrong supplier reference number, e-Way Bill number or date — quantities/
+    /// rates/stock are not editable here (see UpdatePurchaseInvoiceRequest); delete and re-enter
+    /// for anything beyond that, same as every other document in this app that doesn't support
+    /// in-place line edits.</summary>
     [RequirePermission("PurchaseInvoice.Edit")]
     [HttpPut("{id:int}")]
     public IActionResult Update(int id, [FromBody] UpdatePurchaseInvoiceRequest req)
@@ -520,9 +520,10 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         var rows = conn.Execute(
             @"UPDATE Purchase.PurchaseInvoice SET
                 SupplierInvoiceNo = @SupplierInvoiceNo,
+                EwayBillNo = @EwayBillNo,
                 InvoiceDate = ISNULL(@InvoiceDate, InvoiceDate)
               WHERE PurchaseInvoiceId = @id",
-            new { id, req.SupplierInvoiceNo, req.InvoiceDate });
+            new { id, req.SupplierInvoiceNo, req.EwayBillNo, req.InvoiceDate });
         if (rows == 0) return NotFound();
 
         conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Update', 'PurchaseInvoice', @id)", new { id = id.ToString() });

@@ -49,6 +49,7 @@ export default function PurchaseInvoiceCreatePage() {
   const [purchaseOrderId, setPurchaseOrderId] = useState<number | ''>('')
   const [grnId, setGrnId] = useState<number | ''>('')
   const [supplierInvoiceNo, setSupplierInvoiceNo] = useState('')
+  const [ewayBillNo, setEwayBillNo] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [isInterState, setIsInterState] = useState(false) // Local is the default
   const [insurancePct, setInsurancePct] = useState<number | ''>('')
@@ -100,6 +101,7 @@ export default function PurchaseInvoiceCreatePage() {
         purchaseOrderId: purchaseOrderId ? Number(purchaseOrderId) : undefined,
         grnId: grnId ? Number(grnId) : undefined,
         supplierInvoiceNo: supplierInvoiceNo || undefined,
+        ewayBillNo: ewayBillNo || undefined,
         invoiceDate,
         insurancePct: isInterState && insurancePct ? Number(insurancePct) : undefined,
         lines: validLines.map((l) => (isInterState
@@ -141,6 +143,9 @@ export default function PurchaseInvoiceCreatePage() {
             </Field>
             <Field label="Supplier Invoice No.">
               <input value={supplierInvoiceNo} onChange={(e) => setSupplierInvoiceNo(e.target.value)} className={inputClass} />
+            </Field>
+            <Field label="e-Way Bill No.">
+              <input value={ewayBillNo} onChange={(e) => setEwayBillNo(e.target.value)} className={inputClass} placeholder="Supplier's e-Way Bill no." />
             </Field>
             <Field label="Invoice Date">
               <input type="date" max={new Date().toISOString().slice(0, 10)} value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={inputClass} />

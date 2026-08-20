@@ -43,6 +43,7 @@ export default function PurchaseInvoicesPage() {
         !!pi.invoiceNo?.toLowerCase().includes(term) ||
         !!pi.supplierName?.toLowerCase().includes(term) ||
         !!pi.supplierInvoiceNo?.toLowerCase().includes(term) ||
+        !!pi.ewayBillNo?.toLowerCase().includes(term) ||
         pi.status.toLowerCase().includes(term),
     },
   )
@@ -64,7 +65,7 @@ export default function PurchaseInvoicesPage() {
         <DataGridSearchBar
           value={search}
           onChange={setSearch}
-          placeholder="Search invoice no., supplier, supplier invoice no. or status…"
+          placeholder="Search invoice no., supplier, supplier invoice no., e-Way Bill no. or status…"
           pageSize={pageSize}
           onPageSizeChange={setPageSize}
         />
@@ -79,6 +80,7 @@ export default function PurchaseInvoicesPage() {
                   Supplier <SortIcon column="supplierName" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
                 <Th>Type</Th>
+                <Th>e-Way Bill No.</Th>
                 <SortableTh onClick={() => toggleSort('invoiceDate')}>
                   Date <SortIcon column="invoiceDate" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
@@ -92,10 +94,10 @@ export default function PurchaseInvoicesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={8} className="px-5 py-14 text-center text-slate-400">
                     <FileStack size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No purchase invoices match your search.' : (
                       <>No purchase invoices yet. <Link to="/purchase/invoices/new" className="text-brand-600 font-medium">Create one</Link>.</>
@@ -112,6 +114,7 @@ export default function PurchaseInvoicesPage() {
                       {pi.isInterState ? 'Inter-State' : 'Local'}
                     </span>
                   </td>
+                  <td className="px-5 py-3 text-slate-500">{pi.ewayBillNo ?? '—'}</td>
                   <td className="px-5 py-3 text-slate-600">{new Date(pi.invoiceDate).toLocaleDateString('en-IN')}</td>
                   <td className="px-5 py-3 text-right font-semibold text-slate-800">{money(pi.totalValue)}</td>
                   <td className="px-5 py-3"><span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">{pi.status}</span></td>

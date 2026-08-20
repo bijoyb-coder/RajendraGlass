@@ -325,6 +325,8 @@ export interface PurchaseInvoiceDto {
   grnId?: number | null; grnNo?: string | null
   godownId?: number | null; godownName?: string | null
   supplierInvoiceNo?: string | null; invoiceDate: string
+  /** The supplier's own e-Way Bill number for this shipment, entered off their paper invoice. */
+  ewayBillNo?: string | null
   /** Drives which line layout and tax split (CGST+SGST vs IGST) this invoice uses. */
   isInterState: boolean
   basicValue: number
@@ -352,14 +354,14 @@ export interface CreatePurchaseInvoiceRequest {
   /** Optional — defaults to the 'MAIN' godown server-side when not supplied. */
   godownId?: number
   purchaseOrderId?: number; grnId?: number
-  supplierInvoiceNo?: string; invoiceDate?: string
+  supplierInvoiceNo?: string; invoiceDate?: string; ewayBillNo?: string
   /** Inter-State only; ignored for Local invoices. */
   insurancePct?: number
   lines: CreatePurchaseInvoiceLineRequest[]
 }
-/** Fixes a wrong supplier reference number or date — quantities/rates/stock are not editable
- * here; delete and re-enter for anything beyond that. */
-export interface UpdatePurchaseInvoiceRequest { supplierInvoiceNo?: string; invoiceDate?: string }
+/** Fixes a wrong supplier reference number, e-Way Bill number or date — quantities/rates/stock
+ * are not editable here; delete and re-enter for anything beyond that. */
+export interface UpdatePurchaseInvoiceRequest { supplierInvoiceNo?: string; ewayBillNo?: string; invoiceDate?: string }
 
 // ---------- Sales: Quotation / Order ----------
 /** @deprecated Superseded by DimensionUnit; kept only for older stored rows. */
