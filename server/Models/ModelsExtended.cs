@@ -430,9 +430,8 @@ public class CreatePurchaseInvoiceRequest
     public List<CreatePurchaseInvoiceLineRequest> Lines { get; set; } = new();
 }
 
-/// <summary>Fixes a wrong supplier reference number, e-Way Bill selection or date on an already-
-/// booked purchase invoice — quantities/rates/stock are not editable here (they'd need their own
-/// stock reconciliation); delete and re-enter for anything beyond that.</summary>
+/// <summary>Fixes a wrong supplier reference number, e-Way Bill selection, date — and, unlike most
+/// other documents in this app, the line items themselves.</summary>
 public class UpdatePurchaseInvoiceRequest
 {
     public string? SupplierInvoiceNo { get; set; }
@@ -442,6 +441,16 @@ public class UpdatePurchaseInvoiceRequest
     public int? EwayBillId { get; set; }
     public bool ClearEwayBill { get; set; }
     public DateTime? InvoiceDate { get; set; }
+    /// <summary>Pass to replace every line entirely (same shape as Create) — the invoice's own
+    /// IsInterState mode is fixed and can't be changed here, so lines must still match it. The
+    /// stock this invoice previously added is reversed first (refused with 409 if any of it has
+    /// already moved on elsewhere) then the new lines' stock is applied, exactly as at Create time.
+    /// Omit entirely (leave null) to patch only the header fields above and leave lines untouched.
+    /// </summary>
+    public List<CreatePurchaseInvoiceLineRequest>? Lines { get; set; }
+    /// <summary>Inter-State only, and only consulted when Lines is also sent. Omit to keep whatever
+    /// insurance % this invoice was originally booked with; pass 0 to remove it.</summary>
+    public decimal? InsurancePct { get; set; }
 }
 
 // ---------- Purchase: E-way Bill Entry (master, selected from a dropdown when booking a Purchase Invoice) ----------

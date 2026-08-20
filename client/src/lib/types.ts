@@ -363,14 +363,20 @@ export interface CreatePurchaseInvoiceRequest {
   insurancePct?: number
   lines: CreatePurchaseInvoiceLineRequest[]
 }
-/** Fixes a wrong supplier reference number, e-Way Bill selection or date — quantities/rates/stock
- * are not editable here; delete and re-enter for anything beyond that. */
+/** Fixes a wrong supplier reference number, e-Way Bill selection, date — and, unlike most other
+ * documents in this app, the line items themselves. */
 export interface UpdatePurchaseInvoiceRequest {
   supplierInvoiceNo?: string
   /** Pass to switch the linked e-Way Bill; set clearEwayBill instead to unlink without picking a new one. */
   ewayBillId?: number
   clearEwayBill?: boolean
   invoiceDate?: string
+  /** Pass to replace every line entirely (same shape as Create) — must still match the invoice's
+   * own (fixed) isInterState mode. Omit to leave lines untouched. */
+  lines?: CreatePurchaseInvoiceLineRequest[]
+  /** Inter-State only, and only consulted when lines is also sent. Omit to keep the invoice's
+   * original insurance %; pass 0 to remove it. */
+  insurancePct?: number
 }
 
 /** Entered once off the supplier's e-Way Bill slip/QR printout, then picked from a dropdown when

@@ -464,25 +464,8 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
     [HttpPost]
     public IActionResult Create([FromBody] CreatePurchaseInvoiceRequest req)
     {
-        if (req.Lines.Count == 0)
-            return UnprocessableEntity(new ProblemResponse { Title = "No lines", Status = 422, ErrorCode = "LINES_REQUIRED", Detail = "A purchase invoice must have at least one line." });
-
-        for (int i = 0; i < req.Lines.Count; i++)
-        {
-            var l = req.Lines[i];
-            if (req.IsInterState)
-            {
-                if (l.ThicknessMm is null or <= 0 || l.WidthCm is null or <= 0 || l.LengthCm is null or <= 0 || l.NoOfCrates is null or <= 0 || l.SheetsPerCrate is null or <= 0)
-                    return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Thickness, Width, Length, No. of Crates and Sheets per Crate are all required for an Inter-State line." });
-            }
-            else
-            {
-                if (l.Qty is null or <= 0)
-                    return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Quantity is required for a Local line." });
-            }
-            if (l.Rate <= 0)
-                return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Rate must be greater than zero." });
-        }
+        var validation = ValidateLines(req.IsInterState, req.Lines);
+        if (validation is not null) return validation;
 
         using var conn = db.CreateConnection();
         using var tx = conn.BeginTransaction();
@@ -527,11 +510,6 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
             int branchId = DocNumbering.DefaultBranchId(conn, tx);
             string invoiceNo = DocNumbering.NextNumber(conn, tx, branchId, "PurchaseInvoice");
 
-            var productIds = req.Lines.Select(l => l.ProductId).Distinct().ToArray();
-            var gstByProduct = conn.Query<(int ProductId, decimal GstRatePct)>(
-                "SELECT ProductId, GstRatePct FROM Master.Product WHERE ProductId IN @ids", new { ids = productIds }, tx)
-                .ToDictionary(r => r.ProductId, r => r.GstRatePct);
-
             var id = conn.ExecuteScalar<int>(
                 @"INSERT INTO Purchase.PurchaseInvoice
                     (InvoiceNo, SupplierId, PurchaseOrderId, GrnId, GodownId, SupplierInvoiceNo, InvoiceDate, EwayBillNo, EwayBillId, IsInterState, Status)
@@ -542,69 +520,24 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
             if (req.EwayBillId.HasValue)
                 conn.Execute("UPDATE Purchase.EwayBill SET IsUsed = 1 WHERE EwayBillId = @EwayBillId", new { req.EwayBillId }, tx);
 
-            decimal basicTotal = 0, taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
-            foreach (var l in req.Lines)
-            {
-                var calc = req.IsInterState
-                    ? PurchaseInvoiceLinePricing.PriceInterStateLine(l.ThicknessMm!.Value, l.WidthCm!.Value, l.LengthCm!.Value, (int)l.NoOfCrates!.Value, (int)l.SheetsPerCrate!.Value, l.Rate)
-                    : PurchaseInvoiceLinePricing.PriceLocalLine(l.Qty!.Value, l.Rate);
-
-                decimal gstPct = l.GstPct ?? (gstByProduct.TryGetValue(l.ProductId, out var g) ? g : 18m);
-                // Insurance is applied at the header level below, once the line total is known.
-                decimal taxable = calc.BasicValue;
-                decimal tax = Math.Round(taxable * gstPct / 100m, 2);
-                decimal cgst = 0, sgst = 0, igst = 0;
-                if (req.IsInterState) igst = tax; else { cgst = Math.Round(tax / 2m, 2); sgst = tax - cgst; }
-                decimal net = taxable + cgst + sgst + igst;
-
-                basicTotal += calc.BasicValue;
-                taxableTotal += taxable;
-                cgstTotal += cgst; sgstTotal += sgst; igstTotal += igst;
-
-                conn.Execute(
-                    @"INSERT INTO Purchase.PurchaseInvoiceLine
-                        (PurchaseInvoiceId, ProductId, Description, ThicknessMm, WidthCm, LengthCm, NoOfCrates, SheetsPerCrate,
-                         Qty, Area, Rate, BasicValue, GstPct, TaxableValue, CgstAmount, SgstAmount, IgstAmount, NetValue)
-                      VALUES
-                        (@id, @ProductId, @Description, @ThicknessMm, @WidthCm, @LengthCm, @NoOfCrates, @SheetsPerCrate,
-                         @Qty, @Area, @Rate, @BasicValue, @GstPct, @TaxableValue, @CgstAmount, @SgstAmount, @IgstAmount, @NetValue)",
-                    new
-                    {
-                        id, l.ProductId, l.Description, l.ThicknessMm, l.WidthCm, l.LengthCm, l.NoOfCrates, l.SheetsPerCrate,
-                        calc.Qty, calc.Area, l.Rate, calc.BasicValue, gstPct, TaxableValue = taxable,
-                        CgstAmount = cgst, SgstAmount = sgst, IgstAmount = igst, NetValue = net,
-                    }, tx);
-
-                // Same upsert-then-movement pattern GrnController.Create uses for stock.
-                var balance = conn.QueryFirstOrDefault("SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @godownId",
-                    new { l.ProductId, godownId }, tx);
-                if (balance is null)
-                    conn.Execute("INSERT INTO Inventory.StockBalance (ProductId, GodownId, QtyOnHand) VALUES (@ProductId, @godownId, @Area)",
-                        new { l.ProductId, godownId, calc.Area }, tx);
-                else
-                    conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand + @Area WHERE StockBalanceId = @id",
-                        new { calc.Area, id = (int)balance.StockBalanceId }, tx);
-
-                conn.Execute("INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty, Rate) VALUES (@ProductId, @godownId, 'Purchase', 'PurchaseInvoice', @id, @Area, @Rate)",
-                    new { l.ProductId, godownId, id, calc.Area, l.Rate }, tx);
-            }
+            var totals = PriceInsertLinesAndMoveStock(conn, tx, id, req.IsInterState, godownId, req.Lines);
 
             decimal insuranceValue = 0;
             if (req.IsInterState && req.InsurancePct is > 0)
-                insuranceValue = Math.Round(basicTotal * req.InsurancePct.Value / 100m, 2);
+                insuranceValue = Math.Round(totals.BasicTotal * req.InsurancePct.Value / 100m, 2);
             // Insurance itself isn't taxed on the sample invoice (IGST is computed per line before
             // insurance is added) — it just rides along in the taxable/total figures shown below.
 
-            decimal totalBeforeRound = taxableTotal + insuranceValue + cgstTotal + sgstTotal + igstTotal;
+            decimal totalBeforeRound = totals.TaxableTotal + insuranceValue + totals.CgstTotal + totals.SgstTotal + totals.IgstTotal;
             decimal rounded = Math.Round(totalBeforeRound, 0, MidpointRounding.AwayFromZero);
             decimal roundOff = rounded - totalBeforeRound;
 
             conn.Execute(
                 @"UPDATE Purchase.PurchaseInvoice SET
-                    BasicValue = @basicTotal, InsuranceValue = @insuranceValue, TaxableValue = @taxableTotal,
-                    CgstValue = @cgstTotal, SgstValue = @sgstTotal, IgstValue = @igstTotal, RoundOff = @roundOff, TotalValue = @rounded
+                    BasicValue = @BasicTotal, InsuranceValue = @insuranceValue, TaxableValue = @TaxableTotal,
+                    CgstValue = @CgstTotal, SgstValue = @SgstTotal, IgstValue = @IgstTotal, RoundOff = @roundOff, TotalValue = @rounded
                   WHERE PurchaseInvoiceId = @id",
-                new { id, basicTotal, insuranceValue, taxableTotal, cgstTotal, sgstTotal, igstTotal, roundOff, rounded }, tx);
+                new { id, totals.BasicTotal, insuranceValue, totals.TaxableTotal, totals.CgstTotal, totals.SgstTotal, totals.IgstTotal, roundOff, rounded }, tx);
 
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'PurchaseInvoice', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
@@ -617,10 +550,140 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         }
     }
 
-    /// <summary>Fixes a wrong supplier reference number, e-Way Bill selection or date — quantities/
-    /// rates/stock are not editable here (see UpdatePurchaseInvoiceRequest); delete and re-enter
-    /// for anything beyond that, same as every other document in this app that doesn't support
-    /// in-place line edits.</summary>
+    /// <summary>Per-line field validation shared by Create and Update — which fields are required
+    /// depends on IsInterState, since Local and Inter-State lines carry different physical
+    /// breakdowns (see CreatePurchaseInvoiceLineRequest).</summary>
+    private IActionResult? ValidateLines(bool isInterState, List<CreatePurchaseInvoiceLineRequest> lines)
+    {
+        if (lines.Count == 0)
+            return UnprocessableEntity(new ProblemResponse { Title = "No lines", Status = 422, ErrorCode = "LINES_REQUIRED", Detail = "A purchase invoice must have at least one line." });
+
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var l = lines[i];
+            if (isInterState)
+            {
+                if (l.ThicknessMm is null or <= 0 || l.WidthCm is null or <= 0 || l.LengthCm is null or <= 0 || l.NoOfCrates is null or <= 0 || l.SheetsPerCrate is null or <= 0)
+                    return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Thickness, Width, Length, No. of Crates and Sheets per Crate are all required for an Inter-State line." });
+            }
+            else
+            {
+                if (l.Qty is null or <= 0)
+                    return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Quantity is required for a Local line." });
+            }
+            if (l.Rate <= 0)
+                return UnprocessableEntity(new ProblemResponse { Title = "Validation failed", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = $"Line {i + 1}: Rate must be greater than zero." });
+        }
+        return null;
+    }
+
+    /// <summary>Prices every line (reusing PurchaseInvoiceLinePricing, same as at Create time),
+    /// inserts the PurchaseInvoiceLine rows, and moves stock for each — the exact upsert-then-
+    /// movement pattern GrnController.Create uses. Shared by Create and Update (the line-edit path)
+    /// so the two can never drift apart.</summary>
+    private static (decimal BasicTotal, decimal TaxableTotal, decimal CgstTotal, decimal SgstTotal, decimal IgstTotal) PriceInsertLinesAndMoveStock(
+        System.Data.IDbConnection conn, System.Data.IDbTransaction tx, int invoiceId, bool isInterState, int godownId, List<CreatePurchaseInvoiceLineRequest> lines)
+    {
+        var productIds = lines.Select(l => l.ProductId).Distinct().ToArray();
+        var gstByProduct = conn.Query<(int ProductId, decimal GstRatePct)>(
+            "SELECT ProductId, GstRatePct FROM Master.Product WHERE ProductId IN @ids", new { ids = productIds }, tx)
+            .ToDictionary(r => r.ProductId, r => r.GstRatePct);
+
+        decimal basicTotal = 0, taxableTotal = 0, cgstTotal = 0, sgstTotal = 0, igstTotal = 0;
+        foreach (var l in lines)
+        {
+            var calc = isInterState
+                ? PurchaseInvoiceLinePricing.PriceInterStateLine(l.ThicknessMm!.Value, l.WidthCm!.Value, l.LengthCm!.Value, (int)l.NoOfCrates!.Value, (int)l.SheetsPerCrate!.Value, l.Rate)
+                : PurchaseInvoiceLinePricing.PriceLocalLine(l.Qty!.Value, l.Rate);
+
+            decimal gstPct = l.GstPct ?? (gstByProduct.TryGetValue(l.ProductId, out var g) ? g : 18m);
+            // Insurance is applied at the header level by the caller, once the line total is known.
+            decimal taxable = calc.BasicValue;
+            decimal tax = Math.Round(taxable * gstPct / 100m, 2);
+            decimal cgst = 0, sgst = 0, igst = 0;
+            if (isInterState) igst = tax; else { cgst = Math.Round(tax / 2m, 2); sgst = tax - cgst; }
+            decimal net = taxable + cgst + sgst + igst;
+
+            basicTotal += calc.BasicValue;
+            taxableTotal += taxable;
+            cgstTotal += cgst; sgstTotal += sgst; igstTotal += igst;
+
+            conn.Execute(
+                @"INSERT INTO Purchase.PurchaseInvoiceLine
+                    (PurchaseInvoiceId, ProductId, Description, ThicknessMm, WidthCm, LengthCm, NoOfCrates, SheetsPerCrate,
+                     Qty, Area, Rate, BasicValue, GstPct, TaxableValue, CgstAmount, SgstAmount, IgstAmount, NetValue)
+                  VALUES
+                    (@invoiceId, @ProductId, @Description, @ThicknessMm, @WidthCm, @LengthCm, @NoOfCrates, @SheetsPerCrate,
+                     @Qty, @Area, @Rate, @BasicValue, @GstPct, @TaxableValue, @CgstAmount, @SgstAmount, @IgstAmount, @NetValue)",
+                new
+                {
+                    invoiceId, l.ProductId, l.Description, l.ThicknessMm, l.WidthCm, l.LengthCm, l.NoOfCrates, l.SheetsPerCrate,
+                    calc.Qty, calc.Area, l.Rate, calc.BasicValue, gstPct, TaxableValue = taxable,
+                    CgstAmount = cgst, SgstAmount = sgst, IgstAmount = igst, NetValue = net,
+                }, tx);
+
+            // Same upsert-then-movement pattern GrnController.Create uses for stock.
+            var balance = conn.QueryFirstOrDefault("SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @godownId",
+                new { l.ProductId, godownId }, tx);
+            if (balance is null)
+                conn.Execute("INSERT INTO Inventory.StockBalance (ProductId, GodownId, QtyOnHand) VALUES (@ProductId, @godownId, @Area)",
+                    new { l.ProductId, godownId, calc.Area }, tx);
+            else
+                conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand + @Area WHERE StockBalanceId = @id",
+                    new { calc.Area, id = (int)balance.StockBalanceId }, tx);
+
+            conn.Execute("INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty, Rate) VALUES (@ProductId, @godownId, 'Purchase', 'PurchaseInvoice', @invoiceId, @Area, @Rate)",
+                new { l.ProductId, godownId, invoiceId, calc.Area, l.Rate }, tx);
+        }
+        return (basicTotal, taxableTotal, cgstTotal, sgstTotal, igstTotal);
+    }
+
+    /// <summary>Reverses the stock this invoice's lines added so far, refusing with 409 if any of
+    /// it has since moved on elsewhere — the same check GrnController.Delete and this controller's
+    /// own Delete already make, reused here because editing lines has to undo the old ones' stock
+    /// effect before applying the new ones'. Returns null on success, or the Conflict to return.
+    /// </summary>
+    private IActionResult? ReverseStockMovements(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, int invoiceId)
+    {
+        var movements = conn.Query<(int ProductId, int GodownId, decimal Qty)>(
+            "SELECT ProductId, GodownId, Qty FROM Inventory.StockMovement WHERE DocType = 'PurchaseInvoice' AND DocId = @invoiceId AND MovementType = 'Purchase'",
+            new { invoiceId }, tx).ToList();
+
+        foreach (var m in movements)
+        {
+            var qtyFree = conn.ExecuteScalar<decimal?>(
+                "SELECT QtyOnHand FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                new { m.ProductId, m.GodownId }, tx) ?? 0m;
+            if (qtyFree < m.Qty)
+            {
+                var product = conn.QueryFirstOrDefault<string>("SELECT Code FROM Master.Product WHERE ProductId = @ProductId", new { m.ProductId }, tx);
+                return Conflict(new ProblemResponse
+                {
+                    Title = "Stock already moved",
+                    Status = 409,
+                    ErrorCode = "PURCHASEINVOICE_STOCK_CONSUMED",
+                    Detail = $"{product ?? $"Product {m.ProductId}"}: only {qtyFree} of the {m.Qty} added by this invoice is still on hand — the rest has already been sold, transferred or adjusted. The lines cannot be changed.",
+                });
+            }
+        }
+
+        foreach (var m in movements)
+        {
+            conn.Execute(
+                "UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @Qty WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                new { m.Qty, m.ProductId, m.GodownId }, tx);
+        }
+        conn.Execute("DELETE FROM Inventory.StockMovement WHERE DocType = 'PurchaseInvoice' AND DocId = @invoiceId", new { invoiceId }, tx);
+        conn.Execute("DELETE FROM Purchase.PurchaseInvoiceLine WHERE PurchaseInvoiceId = @invoiceId", new { invoiceId }, tx);
+        return null;
+    }
+
+    /// <summary>Fixes a wrong supplier reference number, e-Way Bill selection or date, and — unlike
+    /// most other documents in this app — the line items themselves. Pass <c>Lines</c> to replace
+    /// them entirely: the stock this invoice previously added is reversed first (refused with 409
+    /// if any of it has already moved on elsewhere, same rule Delete enforces), then the new lines
+    /// are priced and their stock applied, exactly as at Create time. Omit <c>Lines</c> to leave
+    /// them untouched and only patch the header fields below.</summary>
     [RequirePermission("PurchaseInvoice.Edit")]
     [HttpPut("{id:int}")]
     public IActionResult Update(int id, [FromBody] UpdatePurchaseInvoiceRequest req)
@@ -629,9 +692,43 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         using var tx = conn.BeginTransaction();
         try
         {
-            var current = conn.QueryFirstOrDefault("SELECT EwayBillId FROM Purchase.PurchaseInvoice WHERE PurchaseInvoiceId = @id", new { id }, tx);
+            var current = conn.QueryFirstOrDefault("SELECT EwayBillId, IsInterState, GodownId, BasicValue, InsuranceValue FROM Purchase.PurchaseInvoice WHERE PurchaseInvoiceId = @id", new { id }, tx);
             if (current is null) { tx.Rollback(); return NotFound(); }
             int? currentEwayBillId = (int?)current.EwayBillId;
+
+            if (req.Lines is not null)
+            {
+                bool isInterState = (bool)current.IsInterState;
+                var validation = ValidateLines(isInterState, req.Lines);
+                if (validation is not null) { tx.Rollback(); return validation; }
+
+                var reverseResult = ReverseStockMovements(conn, tx, id);
+                if (reverseResult is not null) { tx.Rollback(); return reverseResult; }
+
+                int godownId = (int)current.GodownId;
+                var totals = PriceInsertLinesAndMoveStock(conn, tx, id, isInterState, godownId, req.Lines);
+
+                // Preserve whatever insurance % this invoice was booked with (InsuranceValue /
+                // BasicValue, both from before the lines were touched) unless the caller sends an
+                // explicit override — so re-editing lines without mentioning insurance doesn't
+                // silently zero it out.
+                decimal oldBasicValue = (decimal)current.BasicValue;
+                decimal oldInsuranceValue = (decimal)current.InsuranceValue;
+                decimal impliedInsurancePct = oldBasicValue > 0 ? oldInsuranceValue / oldBasicValue * 100m : 0m;
+                decimal insurancePct = req.InsurancePct ?? impliedInsurancePct;
+                decimal insuranceValue = isInterState && insurancePct > 0 ? Math.Round(totals.BasicTotal * insurancePct / 100m, 2) : 0;
+
+                decimal totalBeforeRound = totals.TaxableTotal + insuranceValue + totals.CgstTotal + totals.SgstTotal + totals.IgstTotal;
+                decimal rounded = Math.Round(totalBeforeRound, 0, MidpointRounding.AwayFromZero);
+                decimal roundOff = rounded - totalBeforeRound;
+
+                conn.Execute(
+                    @"UPDATE Purchase.PurchaseInvoice SET
+                        BasicValue = @BasicTotal, InsuranceValue = @insuranceValue, TaxableValue = @TaxableTotal,
+                        CgstValue = @CgstTotal, SgstValue = @SgstTotal, IgstValue = @IgstTotal, RoundOff = @roundOff, TotalValue = @rounded
+                      WHERE PurchaseInvoiceId = @id",
+                    new { id, totals.BasicTotal, insuranceValue, totals.TaxableTotal, totals.CgstTotal, totals.SgstTotal, totals.IgstTotal, roundOff, rounded }, tx);
+            }
 
             // Only touch the e-Way Bill link if the caller actually sent something -- either a new
             // EwayBillId to switch to, or ClearEwayBill=true to unlink. Omitting both leaves the
