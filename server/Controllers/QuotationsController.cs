@@ -26,7 +26,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
     {
         using var conn = db.CreateConnection();
         var rows = conn.Query<QuotationDto>(
-            @"SELECT q.QuotationId, q.QuotationNo, q.CustomerId, c.Name AS CustomerName, q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue,
+            @"SELECT q.QuotationId, q.QuotationNo, q.CustomerId, c.Name AS CustomerName, q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue, q.RoundOff,
                      CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM Sales.SalesOrder o WHERE o.QuotationId = q.QuotationId) THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Sales.Quotation q JOIN Master.Customer c ON c.CustomerId = q.CustomerId ORDER BY q.QuotationId DESC");
         return Ok(new { items = rows });
@@ -78,7 +78,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             @"SELECT q.QuotationId, q.QuotationNo, q.CustomerId, c.Name AS CustomerName,
                      c.CustomerType, c.BillingAddress AS CustomerAddress, c.Gstin AS CustomerGstin,
                      c.Mobile AS CustomerMobile, c.StateName AS CustomerStateName,
-                     q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue,
+                     q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue, q.RoundOff,
                      CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM Sales.SalesOrder o WHERE o.QuotationId = q.QuotationId) THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Sales.Quotation q JOIN Master.Customer c ON c.CustomerId = q.CustomerId WHERE q.QuotationId = @id", new { id });
         if (q is null) return NotFound();
@@ -164,7 +164,11 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             foreach (var l in req.Lines)
                 total += InsertLine(conn, tx, id, l, thicknessByProduct);
 
-            conn.Execute("UPDATE Sales.Quotation SET TotalValue = @total WHERE QuotationId = @id", new { total, id }, tx);
+            // Total is always rounded to the nearest whole rupee, same convention Invoice already
+            // uses; the delta is kept in RoundOff so the printed total reconciles with the lines.
+            decimal rounded = Math.Round(total, 0, MidpointRounding.AwayFromZero);
+            decimal roundOff = rounded - total;
+            conn.Execute("UPDATE Sales.Quotation SET TotalValue = @rounded, RoundOff = @roundOff WHERE QuotationId = @id", new { rounded, roundOff, id }, tx);
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'Quotation', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
             return Created($"/api/v1/quotations/{id}", new { quotationId = id, quotationNo = qNo, customerId });
@@ -216,9 +220,11 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             foreach (var l in req.Lines)
                 total += InsertLine(conn, tx, id, l, thicknessByProduct);
 
+            decimal rounded = Math.Round(total, 0, MidpointRounding.AwayFromZero);
+            decimal roundOff = rounded - total;
             conn.Execute(
-                "UPDATE Sales.Quotation SET CustomerId = @CustomerId, ValidUntil = @ValidUntil, TotalValue = @total WHERE QuotationId = @id",
-                new { req.CustomerId, req.ValidUntil, total, id }, tx);
+                "UPDATE Sales.Quotation SET CustomerId = @CustomerId, ValidUntil = @ValidUntil, TotalValue = @rounded, RoundOff = @roundOff WHERE QuotationId = @id",
+                new { req.CustomerId, req.ValidUntil, rounded, roundOff, id }, tx);
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Update', 'Quotation', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
             return Ok(new { quotationId = id });
@@ -430,7 +436,7 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
         using var conn = db.CreateConnection();
         var rows = conn.Query<SalesOrderDto>(
             @"SELECT o.SalesOrderId, o.OrderNo, o.CustomerId, c.Name AS CustomerName, o.QuotationId, o.OrderDate, o.Status,
-                     o.BasicValue, o.GstValue, o.TotalValue, i.InvoiceId, i.InvoiceNo,
+                     o.BasicValue, o.GstValue, o.TotalValue, o.RoundOff, i.InvoiceId, i.InvoiceNo,
                      CAST(CASE WHEN i.InvoiceId IS NULL
                                AND NOT EXISTS (SELECT 1 FROM Cutting.CuttingPlan cp WHERE cp.SalesOrderId = o.SalesOrderId)
                                AND NOT EXISTS (SELECT 1 FROM Production.WorkOrder wo WHERE wo.SalesOrderId = o.SalesOrderId)
@@ -455,7 +461,7 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
                      c.CustomerType, c.BillingAddress AS CustomerAddress, c.Gstin AS CustomerGstin,
                      c.Mobile AS CustomerMobile, c.StateName AS CustomerStateName,
                      o.QuotationId, q.QuotationNo, o.OrderDate, o.Status,
-                     o.BasicValue, o.GstValue, o.TotalValue, i.InvoiceId, i.InvoiceNo,
+                     o.BasicValue, o.GstValue, o.TotalValue, o.RoundOff, i.InvoiceId, i.InvoiceNo,
                      CAST(CASE WHEN i.InvoiceId IS NULL
                                AND NOT EXISTS (SELECT 1 FROM Cutting.CuttingPlan cp WHERE cp.SalesOrderId = o.SalesOrderId)
                                AND NOT EXISTS (SELECT 1 FROM Production.WorkOrder wo WHERE wo.SalesOrderId = o.SalesOrderId)
@@ -644,9 +650,13 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
                     }, tx);
             }
 
+            // Total is always rounded to the nearest whole rupee, same convention Invoice already
+            // uses; the delta is kept in RoundOff so the printed total reconciles with the lines.
+            decimal rounded = Math.Round(total, 0, MidpointRounding.AwayFromZero);
+            decimal roundOff = rounded - total;
             conn.Execute(
-                "UPDATE Sales.SalesOrder SET BasicValue = @basicTotal, GstValue = @gstTotal, TotalValue = @total WHERE SalesOrderId = @id",
-                new { basicTotal, gstTotal, total, id }, tx);
+                "UPDATE Sales.SalesOrder SET BasicValue = @basicTotal, GstValue = @gstTotal, TotalValue = @rounded, RoundOff = @roundOff WHERE SalesOrderId = @id",
+                new { basicTotal, gstTotal, rounded, roundOff, id }, tx);
 
             if (req.QuotationId.HasValue)
                 conn.Execute("UPDATE Sales.Quotation SET Status = 'Converted' WHERE QuotationId = @QuotationId", new { req.QuotationId }, tx);

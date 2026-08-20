@@ -30,11 +30,12 @@ export default function SalesOrderViewPage() {
   }
 
   // Summed from the stored per-line figures, which the server produced with the one
-  // calculation engine — the print can never disagree with the saved order.
+  // calculation engine — the print can never disagree with the saved order. The Grand Total
+  // itself, though, comes from o.totalValue (already rounded to the nearest rupee server-side),
+  // not this raw line sum — o.roundOff is exactly the gap between the two.
   const basic = o.lines.reduce((s, l) => s + l.basicAmount, 0)
   const discount = o.lines.reduce((s, l) => s + l.discountAmount, 0)
   const gst = o.lines.reduce((s, l) => s + l.gstAmount, 0)
-  const total = o.lines.reduce((s, l) => s + l.amount, 0)
   const anyOverride = o.lines.some((l) => l.isAreaManualOverride || l.isAmountManualOverride)
 
   return (
@@ -166,8 +167,9 @@ export default function SalesOrderViewPage() {
             <Row label="Basic Amount" value={money(basic)} />
             {discount > 0 && <Row label="Discount" value={`− ${money(discount)}`} />}
             <Row label="GST" value={money(gst)} />
+            <Row label="Round Off" value={money(o.roundOff)} />
             <div className="flex justify-between font-bold text-brand-900 border-t-2 border-brand-800 pt-2 mt-2 text-base">
-              <span>Order Value</span><span>₹ {money(total)}</span>
+              <span>Order Value</span><span>₹ {money(o.totalValue)}</span>
             </div>
           </div>
         </div>

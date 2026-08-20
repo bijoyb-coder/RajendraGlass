@@ -355,7 +355,9 @@ export interface QuotationDto {
   /** Returned by GET /quotations/{id} only (the print view needs them); absent in the list. */
   customerType?: CustomerType | null; customerAddress?: string | null; customerGstin?: string | null
   customerMobile?: string | null; customerStateName?: string | null
-  quotationDate: string; validUntil?: string | null; status: string; totalValue: number
+  quotationDate: string; validUntil?: string | null; status: string
+  /** Always rounded to the nearest whole rupee; the delta is roundOff. */
+  totalValue: number; roundOff: number
   /** True while no sales order has been generated against this quotation. */
   canDelete: boolean
   lines: QuotationLineDto[]
@@ -427,7 +429,9 @@ export interface SalesOrderDto {
   /** Returned by GET /sales-orders/{id} only (the print view needs them); absent in the list. */
   customerType?: CustomerType | null; customerAddress?: string | null; customerGstin?: string | null
   customerMobile?: string | null; customerStateName?: string | null
-  orderDate: string; status: string; totalValue: number
+  orderDate: string; status: string
+  /** Always rounded to the nearest whole rupee; the delta is roundOff. */
+  totalValue: number; roundOff: number
   /** True while no invoice (and no cutting plan / work order) has been raised against this order. */
   canDelete: boolean
   lines: SalesOrderLineDto[]
