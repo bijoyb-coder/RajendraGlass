@@ -39,6 +39,7 @@ export interface ProductDto {
   sellingRate?: number | null
   minSellingPrice?: number | null
   isActive: boolean
+  canDelete: boolean
 }
 
 export type CustomerType = 'Wholesale' | 'Retail'

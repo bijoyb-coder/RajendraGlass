@@ -20,6 +20,14 @@ export const mastersApi = api.injectEndpoints({
       query: (body) => ({ url: '/products', method: 'POST', body }),
       invalidatesTags: ['Product'],
     }),
+    updateProduct: builder.mutation<void, { id: number; body: Partial<ProductDto> }>({
+      query: ({ id, body }) => ({ url: `/products/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['Product'],
+    }),
+    deleteProduct: builder.mutation<void, number>({
+      query: (id) => ({ url: `/products/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Product'],
+    }),
 
     listCustomers: builder.query<{ items: CustomerDto[]; total: number }, { search?: string } | void>({
       query: (args) => ({ url: '/customers', params: args ?? {} }),
@@ -45,6 +53,8 @@ export const {
   useUpdateCompanyMutation,
   useListProductsQuery,
   useCreateProductMutation,
+  useUpdateProductMutation,
+  useDeleteProductMutation,
   useListCustomersQuery,
   useCreateCustomerMutation,
   useListTransportersQuery,
