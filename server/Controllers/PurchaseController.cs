@@ -12,15 +12,30 @@ namespace RajendraGlass.Api.Controllers;
 [Authorize]
 public class SuppliersController(IDbConnectionFactory db) : ControllerBase
 {
+    /// <summary>A GRN is never checked directly — every GRN traces back through its own Purchase
+    /// Order, whose SupplierId is NOT NULL, so the PurchaseOrder check below already covers it.
+    /// Voucher/EwayBill are real foreign keys into Master.Supplier too, so they're included here
+    /// even though the user only asked about PO/Invoice/GRN — otherwise DELETE would fail with a
+    /// raw constraint error for a supplier that's only ever been paid or had an e-Way Bill logged.
+    /// </summary>
+    private const string CanDeleteSql =
+        @"CAST(CASE WHEN
+            NOT EXISTS (SELECT 1 FROM Purchase.PurchaseOrder po WHERE po.SupplierId = s.SupplierId)
+            AND NOT EXISTS (SELECT 1 FROM Purchase.PurchaseInvoice pi WHERE pi.SupplierId = s.SupplierId)
+            AND NOT EXISTS (SELECT 1 FROM Finance.Voucher v WHERE v.SupplierId = s.SupplierId)
+            AND NOT EXISTS (SELECT 1 FROM Purchase.EwayBill eb WHERE eb.SupplierId = s.SupplierId)
+          THEN 1 ELSE 0 END AS BIT)";
+
     [HttpGet]
     public IActionResult List([FromQuery] string? search)
     {
         using var conn = db.CreateConnection();
         var rows = conn.Query<SupplierDto>(
-            @"SELECT SupplierId, Code, Name, Gstin, Phone, Mobile, Email, Address, StateName, CreditPeriodDays, IsActive
-              FROM Master.Supplier
-              WHERE IsActive = 1 AND (@search IS NULL OR Code LIKE '%' + @search + '%' OR Name LIKE '%' + @search + '%')
-              ORDER BY Name", new { search });
+            $@"SELECT s.SupplierId, s.Code, s.Name, s.Gstin, s.Phone, s.Mobile, s.Email, s.Address, s.StateName, s.CreditPeriodDays, s.IsActive,
+                      {CanDeleteSql} AS CanDelete
+              FROM Master.Supplier s
+              WHERE s.IsActive = 1 AND (@search IS NULL OR s.Code LIKE '%' + @search + '%' OR s.Name LIKE '%' + @search + '%')
+              ORDER BY s.Name", new { search });
         return Ok(new { items = rows });
     }
 
@@ -35,6 +50,52 @@ public class SuppliersController(IDbConnectionFactory db) : ControllerBase
               VALUES (@Code, @Name, @Gstin, @Phone, @Mobile, @Email, @Address, @StateName, @CreditPeriodDays, 1)", dto);
         dto.SupplierId = id;
         return Created($"/api/v1/suppliers/{id}", dto);
+    }
+
+    /// <summary>Deletable only while nothing has ever been booked against this supplier — see
+    /// CanDeleteSql above for exactly which references are checked and why.</summary>
+    [RequirePermission("Supplier.Delete")]
+    [HttpDelete("{id:int}")]
+    public IActionResult Delete(int id)
+    {
+        using var conn = db.CreateConnection();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var supplier = conn.QueryFirstOrDefault("SELECT * FROM Master.Supplier WHERE SupplierId = @id", new { id }, tx);
+            if (supplier is null) { tx.Rollback(); return NotFound(); }
+
+            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Purchase.PurchaseOrder WHERE SupplierId = @id", new { id }, tx) > 0)
+            {
+                tx.Rollback();
+                return Conflict(new ProblemResponse { Title = "Supplier has a Purchase Order", Status = 409, ErrorCode = "SUPPLIER_HAS_PURCHASE_ORDER", Detail = "A Purchase Order (and any GRN posted against it) already exists for this supplier; it cannot be deleted." });
+            }
+            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Purchase.PurchaseInvoice WHERE SupplierId = @id", new { id }, tx) > 0)
+            {
+                tx.Rollback();
+                return Conflict(new ProblemResponse { Title = "Supplier has a Purchase Invoice", Status = 409, ErrorCode = "SUPPLIER_HAS_PURCHASE_INVOICE", Detail = "A Purchase Invoice has already been booked against this supplier; it cannot be deleted." });
+            }
+            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Finance.Voucher WHERE SupplierId = @id", new { id }, tx) > 0)
+            {
+                tx.Rollback();
+                return Conflict(new ProblemResponse { Title = "Supplier has a payment", Status = 409, ErrorCode = "SUPPLIER_HAS_VOUCHER", Detail = "A payment voucher has already been recorded against this supplier; it cannot be deleted." });
+            }
+            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Purchase.EwayBill WHERE SupplierId = @id", new { id }, tx) > 0)
+            {
+                tx.Rollback();
+                return Conflict(new ProblemResponse { Title = "Supplier has an e-Way Bill", Status = 409, ErrorCode = "SUPPLIER_HAS_EWAYBILL", Detail = "An e-Way Bill entry has already been logged for this supplier; it cannot be deleted." });
+            }
+
+            conn.Execute("DELETE FROM Master.Supplier WHERE SupplierId = @id", new { id }, tx);
+            AuditLogger.LogDelete(conn, tx, User, HttpContext, "Supplier", id.ToString(), supplier);
+            tx.Commit();
+            return NoContent();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 }
 

@@ -15,6 +15,10 @@ export const purchaseApi = api.injectEndpoints({
       query: (body) => ({ url: '/suppliers', method: 'POST', body }),
       invalidatesTags: ['Supplier'],
     }),
+    deleteSupplier: builder.mutation<void, number>({
+      query: (id) => ({ url: `/suppliers/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Supplier'],
+    }),
 
     listPurchaseOrders: builder.query<{ items: PurchaseOrderDto[] }, void>({
       query: () => '/purchase-orders',
@@ -89,6 +93,7 @@ export const purchaseApi = api.injectEndpoints({
 export const {
   useListSuppliersQuery,
   useCreateSupplierMutation,
+  useDeleteSupplierMutation,
   useListPurchaseOrdersQuery,
   useGetPurchaseOrderQuery,
   useLazyGetPurchaseOrderQuery,

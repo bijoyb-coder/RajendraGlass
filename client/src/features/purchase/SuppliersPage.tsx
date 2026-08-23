@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus, X, Factory } from 'lucide-react'
-import { useListSuppliersQuery, useCreateSupplierMutation } from './purchaseApi'
+import { useListSuppliersQuery, useCreateSupplierMutation, useDeleteSupplierMutation } from './purchaseApi'
 import {
   useDataGrid,
   SortIcon,
@@ -10,6 +10,8 @@ import {
   DataGridPagination,
   DATA_GRID_HEAD_ROW_CLASS,
   DATA_GRID_ROW_CLASS,
+  ActionTh,
+  DeleteRowAction,
 } from '../../components/DataGrid'
 import type { SupplierDto } from '../../lib/types'
 
@@ -21,6 +23,7 @@ type SortKey = 'code' | 'name' | 'gstin' | 'creditPeriodDays'
 export default function SuppliersPage() {
   const { data, isLoading } = useListSuppliersQuery()
   const [createSupplier, { isLoading: saving }] = useCreateSupplierMutation()
+  const [deleteSupplier] = useDeleteSupplierMutation()
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState<Partial<SupplierDto>>(emptyForm)
   const [error, setError] = useState<string | null>(null)
@@ -123,13 +126,14 @@ export default function SuppliersPage() {
                 <SortableTh onClick={() => toggleSort('creditPeriodDays')}>
                   Credit Period <SortIcon column="creditPeriodDays" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
+                <ActionTh />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={6} className="px-5 py-14 text-center text-slate-400">
                     <Factory size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No suppliers match your search.' : 'No suppliers yet.'}
                   </td>
@@ -142,6 +146,13 @@ export default function SuppliersPage() {
                   <td className="px-5 py-3 text-slate-500">{s.gstin ?? '—'}</td>
                   <td className="px-5 py-3 text-slate-500">{s.phone ?? s.mobile ?? '—'}</td>
                   <td className="px-5 py-3 text-slate-500">{s.creditPeriodDays} days</td>
+                  <td className="px-5 py-3 text-right">
+                    <DeleteRowAction
+                      canDelete={s.canDelete}
+                      itemLabel={`Supplier ${s.name}`}
+                      onDelete={() => deleteSupplier(s.supplierId).unwrap()}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
