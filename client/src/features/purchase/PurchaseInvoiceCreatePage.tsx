@@ -3,44 +3,59 @@ import { useNavigate, Link } from 'react-router-dom'
 import { Plus, Trash2, Save } from 'lucide-react'
 import { useListProductsQuery } from '../masters/mastersApi'
 import { useListSuppliersQuery, useListPurchaseOrdersQuery, useListGrnsQuery, useListEwayBillsQuery, useCreatePurchaseInvoiceMutation } from './purchaseApi'
-import type { CreatePurchaseInvoiceLineRequest } from '../../lib/types'
+import type { CreatePurchaseInvoiceLineRequest, CreatePurchaseInvoiceChargeRequest } from '../../lib/types'
 
 interface LineRow extends CreatePurchaseInvoiceLineRequest {
   key: string
 }
+interface ChargeRow extends CreatePurchaseInvoiceChargeRequest {
+  key: string
+}
 
 function emptyLine(): LineRow {
-  return { key: crypto.randomUUID(), productId: 0, rate: 0 }
+  return { key: crypto.randomUUID(), productId: 0, area: 0, rate: 0 }
+}
+function emptyCharge(): ChargeRow {
+  return { key: crypto.randomUUID(), label: '', basis: 'Flat', value: 0 }
 }
 
 function money(n: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n)
 }
 
-/** Mirrors QuotationCalculator's Sheet3 metre convention (server/Data/QuotationCalculator.cs) —
- * rate x thickness gives the effective per-sqm rate, exactly the "per MM" pricing an Inter-State
- * supplier invoice quotes. Local lines are the plain qty x rate a Local invoice states directly.
- * insurancePct (Inter-State only) is each line's own share of insurance, taxed along with the rest
- * of that line's value — matching PurchaseController.PriceInsertLinesAndMoveStock, which folds it
- * into the line's taxable value (Section 15 CGST Act: incidental charges are part of the taxable
- * transaction value), not applied as an untaxed lump sum at header level. */
-function priceLine(line: LineRow, isInterState: boolean, gstPct: number, insurancePct: number) {
-  let area: number, basic: number
-  if (isInterState) {
-    const t = line.thicknessMm || 0, w = line.widthCm || 0, l = line.lengthCm || 0
-    const crates = line.noOfCrates || 0, sheets = line.sheetsPerCrate || 0
-    const qty = crates * sheets
-    const perPieceArea = (l / 100) * (w / 100)
-    area = perPieceArea * qty
-    basic = area * t * (line.rate || 0)
-  } else {
-    area = line.qty || 0
-    basic = area * (line.rate || 0)
-  }
-  const insurance = isInterState && insurancePct ? (basic * insurancePct) / 100 : 0
-  const taxable = basic + insurance
-  const tax = (taxable * gstPct) / 100
-  return { area, basic, insurance, taxable, tax }
+/** Same shape for Local and Inter-State — Area is typed straight off the paper, BasicValue =
+ * Area x Rate, plus optional per-piece Holes/Cutout charges. Mirrors
+ * PurchaseController.PriceInsertLinesAndMoveStock exactly, for a live client-side preview. */
+function priceLine(line: LineRow) {
+  const basic = (line.area || 0) * (line.rate || 0)
+  const holesAmount = (line.holesQty || 0) * (line.holesRate || 0)
+  const cutoutAmount = (line.cutoutQty || 0) * (line.cutoutRate || 0)
+  const lineTotal = basic + holesAmount + cutoutAmount
+  return { basic, holesAmount, cutoutAmount, lineTotal }
+}
+
+/** Mirrors PurchaseController.ApplyChargesAndTax's sequential-charge algorithm exactly: each
+ * 'Percent' charge is computed against the running subtotal at that point (Basic Amount plus every
+ * charge entered before it), not the raw Basic Amount — matching how real supplier invoices
+ * (Dhandhania Industries) actually cascade Admin Charge → Installation → Freight → Insurance. */
+function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, isInterState: boolean) {
+  const basicAmountTotal = lines.reduce((sum, l) => sum + priceLine(l).lineTotal, 0)
+  let runningSubtotal = basicAmountTotal
+  const chargeAmounts = charges.map((c) => {
+    const amount = c.basis === 'Percent' ? Math.round(runningSubtotal * (c.value || 0) / 100 * 100) / 100 : (c.value || 0)
+    runningSubtotal += amount
+    return amount
+  })
+  const chargesTotal = runningSubtotal - basicAmountTotal
+  const assessableValue = runningSubtotal
+  const tax = Math.round(assessableValue * (gstPct || 0) / 100 * 100) / 100
+  const cgst = isInterState ? 0 : Math.round(tax / 2 * 100) / 100
+  const sgst = isInterState ? 0 : tax - cgst
+  const igst = isInterState ? tax : 0
+  const totalBeforeRound = assessableValue + tax
+  const total = Math.round(totalBeforeRound)
+  const roundOff = total - totalBeforeRound
+  return { basicAmountTotal, chargeAmounts, chargesTotal, assessableValue, cgst, sgst, igst, roundOff, total }
 }
 
 export default function PurchaseInvoiceCreatePage() {
@@ -59,48 +74,37 @@ export default function PurchaseInvoiceCreatePage() {
   // Only entries for the chosen supplier, not already linked to another invoice.
   const { data: ewayBills } = useListEwayBillsQuery(supplierId ? { supplierId: Number(supplierId), availableOnly: true } : { availableOnly: true })
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [isInterState, setIsInterState] = useState(false) // Local is the default
-  const [insurancePct, setInsurancePct] = useState<number | ''>('')
+  const [isInterState, setIsInterState] = useState(false) // Local is the default — drives only the header CGST+SGST-vs-IGST split
+  const [gstPct, setGstPct] = useState<number | ''>(18)
   const [error, setError] = useState<string | null>(null)
 
   const [lines, setLines] = useState<LineRow[]>([emptyLine()])
+  const [charges, setCharges] = useState<ChargeRow[]>([])
 
   function addLine() { setLines((prev) => [...prev, emptyLine()]) }
   function removeLine(key: string) { setLines((prev) => prev.filter((l) => l.key !== key)) }
   function updateLine(key: string, patch: Partial<LineRow>) { setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l))) }
+
+  function addCharge() { setCharges((prev) => [...prev, emptyCharge()]) }
+  function removeCharge(key: string) { setCharges((prev) => prev.filter((c) => c.key !== key)) }
+  function updateCharge(key: string, patch: Partial<ChargeRow>) { setCharges((prev) => prev.map((c) => (c.key === key ? { ...c, ...patch } : c))) }
 
   function onProductChange(key: string, productId: number) {
     const product = products?.items.find((p) => p.productId === productId)
     updateLine(key, { productId, rate: product?.purchaseRate ?? 0 })
   }
 
-  function gstFor(line: LineRow) {
-    return line.gstPct ?? products?.items.find((p) => p.productId === line.productId)?.gstRatePct ?? 18
-  }
-
-  const totals = useMemo(() => {
-    let basic = 0, insurance = 0, tax = 0
-    for (const l of lines) {
-      const p = priceLine(l, isInterState, gstFor(l), Number(insurancePct) || 0)
-      basic += p.basic
-      insurance += p.insurance
-      tax += p.tax
-    }
-    const taxable = basic + insurance
-    const total = Math.round(taxable + tax)
-    return { basic, insurance, taxable, tax, total }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lines, isInterState, insurancePct, products])
+  const totals = useMemo(() => computeTotals(lines, charges, Number(gstPct) || 0, isInterState), [lines, charges, gstPct, isInterState])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     if (!supplierId) { setError('Please select a supplier.'); return }
 
-    const validLines = lines.filter((l) => l.productId && l.rate > 0 && (isInterState
-      ? l.thicknessMm && l.widthCm && l.lengthCm && l.noOfCrates && l.sheetsPerCrate
-      : l.qty && l.qty > 0))
-    if (validLines.length === 0) { setError('Add at least one valid line item — every field for the selected type is required.'); return }
+    const validLines = lines.filter((l) => l.productId && l.area > 0 && l.rate > 0)
+    if (validLines.length === 0) { setError('Add at least one valid line item — Product, Area and Rate are required.'); return }
+    const invalidCharge = charges.find((c) => !c.label.trim())
+    if (invalidCharge) { setError('Every charge needs a label.'); return }
 
     try {
       const result = await createPurchaseInvoice({
@@ -111,10 +115,12 @@ export default function PurchaseInvoiceCreatePage() {
         supplierInvoiceNo: supplierInvoiceNo || undefined,
         ewayBillId: ewayBillId ? Number(ewayBillId) : undefined,
         invoiceDate,
-        insurancePct: isInterState && insurancePct ? Number(insurancePct) : undefined,
-        lines: validLines.map((l) => (isInterState
-          ? { productId: l.productId, description: l.description, thicknessMm: l.thicknessMm, widthCm: l.widthCm, lengthCm: l.lengthCm, noOfCrates: l.noOfCrates, sheetsPerCrate: l.sheetsPerCrate, rate: l.rate, gstPct: l.gstPct }
-          : { productId: l.productId, description: l.description, qty: l.qty, rate: l.rate, gstPct: l.gstPct })),
+        gstPct: Number(gstPct) || 0,
+        charges: charges.map((c) => ({ label: c.label, basis: c.basis, value: c.value || 0 })),
+        lines: validLines.map((l) => ({
+          productId: l.productId, description: l.description, qty: l.qty, area: l.area, rate: l.rate,
+          holesQty: l.holesQty, holesRate: l.holesRate, cutoutQty: l.cutoutQty, cutoutRate: l.cutoutRate,
+        })),
       }).unwrap()
       navigate(`/purchase/invoices/${result.purchaseInvoiceId}`)
     } catch (err: any) {
@@ -174,11 +180,9 @@ export default function PurchaseInvoiceCreatePage() {
                 {grns?.items.map((g) => <option key={g.grnId} value={g.grnId}>{g.grnNo} — {g.supplierName}</option>)}
               </select>
             </Field>
-            {isInterState && (
-              <Field label="Insurance %">
-                <input type="number" min={0} step="0.001" value={insurancePct} onChange={(e) => setInsurancePct(e.target.value ? Number(e.target.value) : '')} className={inputClass} placeholder="e.g. 0.323" />
-              </Field>
-            )}
+            <Field label="GST % *">
+              <input type="number" required min={0} step="0.01" value={gstPct} onChange={(e) => setGstPct(e.target.value ? Number(e.target.value) : '')} className={inputClass} />
+            </Field>
           </div>
         </div>
 
@@ -194,28 +198,20 @@ export default function PurchaseInvoiceCreatePage() {
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-100">
                   <th className="px-4 py-2.5 font-medium min-w-[200px]">Product</th>
-                  {isInterState ? (
-                    <>
-                      <th className="px-4 py-2.5 font-medium w-24">Thick (mm)</th>
-                      <th className="px-4 py-2.5 font-medium w-24">Width (cm)</th>
-                      <th className="px-4 py-2.5 font-medium w-24">Length (cm)</th>
-                      <th className="px-4 py-2.5 font-medium w-24">No. Crates</th>
-                      <th className="px-4 py-2.5 font-medium w-24">Sheets/Crate</th>
-                      <th className="px-4 py-2.5 font-medium w-28">Rate (per mm)</th>
-                    </>
-                  ) : (
-                    <>
-                      <th className="px-4 py-2.5 font-medium w-32">Qty (sqm)</th>
-                      <th className="px-4 py-2.5 font-medium w-28">Rate</th>
-                    </>
-                  )}
-                  <th className="px-4 py-2.5 font-medium w-32 text-right">Value</th>
+                  <th className="px-4 py-2.5 font-medium w-20">Qty</th>
+                  <th className="px-4 py-2.5 font-medium w-24">Area (sqm)</th>
+                  <th className="px-4 py-2.5 font-medium w-24">Rate</th>
+                  <th className="px-4 py-2.5 font-medium w-20">Holes Qty</th>
+                  <th className="px-4 py-2.5 font-medium w-24">Holes Rate</th>
+                  <th className="px-4 py-2.5 font-medium w-20">Cutout Qty</th>
+                  <th className="px-4 py-2.5 font-medium w-24">Cutout Rate</th>
+                  <th className="px-4 py-2.5 font-medium w-32 text-right">Line Total</th>
                   <th className="w-10" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {lines.map((line) => {
-                  const { basic } = priceLine(line, isInterState, gstFor(line), Number(insurancePct) || 0)
+                  const { lineTotal } = priceLine(line)
                   return (
                     <tr key={line.key}>
                       <td className="px-4 py-2">
@@ -224,22 +220,14 @@ export default function PurchaseInvoiceCreatePage() {
                           {products?.items.map((p) => <option key={p.productId} value={p.productId}>{p.code} — {p.description}</option>)}
                         </select>
                       </td>
-                      {isInterState ? (
-                        <>
-                          <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.thicknessMm ?? ''} onChange={(e) => updateLine(line.key, { thicknessMm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                          <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.widthCm ?? ''} onChange={(e) => updateLine(line.key, { widthCm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                          <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.lengthCm ?? ''} onChange={(e) => updateLine(line.key, { lengthCm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                          <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.noOfCrates ?? ''} onChange={(e) => updateLine(line.key, { noOfCrates: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                          <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.sheetsPerCrate ?? ''} onChange={(e) => updateLine(line.key, { sheetsPerCrate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                          <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="px-4 py-2"><input type="number" min={0} step="0.0001" value={line.qty ?? ''} onChange={(e) => updateLine(line.key, { qty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                          <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
-                        </>
-                      )}
-                      <td className="px-4 py-2 text-right font-medium text-slate-700">{money(basic)}</td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.qty ?? ''} onChange={(e) => updateLine(line.key, { qty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="0.001" value={line.area || ''} onChange={(e) => updateLine(line.key, { area: Number(e.target.value) })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.holesQty ?? ''} onChange={(e) => updateLine(line.key, { holesQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.holesRate ?? ''} onChange={(e) => updateLine(line.key, { holesRate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.cutoutQty ?? ''} onChange={(e) => updateLine(line.key, { cutoutQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.cutoutRate ?? ''} onChange={(e) => updateLine(line.key, { cutoutRate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                      <td className="px-4 py-2 text-right font-medium text-slate-700">{money(lineTotal)}</td>
                       <td className="px-2">
                         <button type="button" onClick={() => removeLine(line.key)} className="text-slate-400 hover:text-red-500 transition">
                           <Trash2 size={15} />
@@ -251,13 +239,64 @@ export default function PurchaseInvoiceCreatePage() {
               </tbody>
             </table>
           </div>
+        </div>
 
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
+            <h2 className="font-semibold text-slate-800">Charges</h2>
+            <button type="button" onClick={addCharge} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
+              <Plus size={15} /> Add Charge
+            </button>
+          </div>
+          {charges.length === 0 ? (
+            <p className="px-5 py-4 text-sm text-slate-400">No charges — Admin Charge, Insurance, Freight, Energy, etc. can be added here, each as a % of the running total so far or a flat amount.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                    <th className="px-4 py-2.5 font-medium min-w-[200px]">Label</th>
+                    <th className="px-4 py-2.5 font-medium w-32">Basis</th>
+                    <th className="px-4 py-2.5 font-medium w-28">Value</th>
+                    <th className="px-4 py-2.5 font-medium w-32 text-right">Amount</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {charges.map((c, i) => (
+                    <tr key={c.key}>
+                      <td className="px-4 py-2"><input value={c.label} onChange={(e) => updateCharge(c.key, { label: e.target.value })} className={inputClass} placeholder="e.g. Admin Charge" /></td>
+                      <td className="px-4 py-2">
+                        <select value={c.basis} onChange={(e) => updateCharge(c.key, { basis: e.target.value as 'Percent' | 'Flat' })} className={inputClass}>
+                          <option value="Flat">Flat ₹</option>
+                          <option value="Percent">% of running total</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-2"><input type="number" step="0.01" value={c.value || ''} onChange={(e) => updateCharge(c.key, { value: Number(e.target.value) })} className={inputClass} /></td>
+                      <td className="px-4 py-2 text-right font-medium text-slate-700">{money(totals.chargeAmounts[i] ?? 0)}</td>
+                      <td className="px-2">
+                        <button type="button" onClick={() => removeCharge(c.key)} className="text-slate-400 hover:text-red-500 transition">
+                          <Trash2 size={15} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <div className="flex justify-end px-5 py-4 border-t border-slate-100">
             <div className="w-full sm:w-64 space-y-1.5 text-sm">
-              <Row label="Basic Value" value={money(totals.basic)} />
-              {isInterState && <Row label="Insurance" value={money(totals.insurance)} />}
-              <Row label="Taxable Value" value={money(totals.taxable)} />
-              <Row label={isInterState ? 'IGST' : 'CGST + SGST'} value={money(totals.tax)} />
+              <Row label="Basic Amount" value={money(totals.basicAmountTotal)} />
+              {charges.map((c, i) => <Row key={c.key} label={c.label || `Charge ${i + 1}`} value={money(totals.chargeAmounts[i] ?? 0)} />)}
+              <Row label="Assessable Value" value={money(totals.assessableValue)} />
+              {isInterState ? <Row label="IGST" value={money(totals.igst)} /> : (
+                <>
+                  <Row label="CGST" value={money(totals.cgst)} />
+                  <Row label="SGST" value={money(totals.sgst)} />
+                </>
+              )}
+              <Row label="Round Off" value={money(totals.roundOff)} />
               <div className="flex justify-between font-bold text-brand-900 border-t border-slate-200 pt-1.5 mt-1.5">
                 <span>Total</span><span>{money(totals.total)}</span>
               </div>

@@ -332,23 +332,57 @@ public class PurchaseInvoiceLineDto
     public string? ProductCode { get; set; }
     public string? ProductDescription { get; set; }
     public string? Description { get; set; }
-    // ----- Inter-State only (null for Local lines) -----
+    // ----- legacy only (NULL for lines entered since the unified-column redesign; kept so older
+    // invoices booked under the old Inter-State geometry entry still display their stored data) -----
     public decimal? ThicknessMm { get; set; }
     public decimal? WidthCm { get; set; }
     public decimal? LengthCm { get; set; }
     public int? NoOfCrates { get; set; }
     public int? SheetsPerCrate { get; set; }
-    // ----- common -----
+    // ----- entered directly, same shape for every line regardless of Local/Inter-State -----
+    /// <summary>Piece/case count off the paper — informational; Area (not Qty) is what drives
+    /// BasicValue and stock.</summary>
     public decimal Qty { get; set; }
     public decimal Area { get; set; }
     public decimal Rate { get; set; }
     public decimal BasicValue { get; set; }
-    public decimal GstPct { get; set; } = 18;
+    /// <summary>Per-piece hole-drilling charge for this line: HolesQty x HolesRate.</summary>
+    public decimal? HolesQty { get; set; }
+    public decimal? HolesRate { get; set; }
+    public decimal HolesAmount { get; set; }
+    /// <summary>Per-piece cutout charge for this line: CutoutQty x CutoutRate.</summary>
+    public decimal? CutoutQty { get; set; }
+    public decimal? CutoutRate { get; set; }
+    public decimal CutoutAmount { get; set; }
+    /// <summary>This line's contribution to the invoice's Basic Amount: BasicValue + HolesAmount +
+    /// CutoutAmount.</summary>
     public decimal TaxableValue { get; set; }
+    /// <summary>Informational only — GST is computed once at header level (see
+    /// PurchaseInvoiceDto.GstPct); these are this line's proportional share of the header
+    /// CGST/SGST/IGST, server-computed so the column always sums exactly to the header figure.
+    /// </summary>
     public decimal CgstAmount { get; set; }
     public decimal SgstAmount { get; set; }
     public decimal IgstAmount { get; set; }
+    /// <summary>Informational line grand total: this line's share of Basic Amount + charges + tax.
+    /// </summary>
     public decimal NetValue { get; set; }
+}
+
+/// <summary>One header-level charge (Admin Charge, Insurance, Freight, Energy, ...) — a free-form,
+/// ordered list so the entry form matches whatever a given supplier's paper actually itemizes,
+/// rather than a fixed set of named fields.</summary>
+public class PurchaseInvoiceChargeDto
+{
+    public string Label { get; set; } = "";
+    /// <summary>'Percent' or 'Flat'.</summary>
+    public string Basis { get; set; } = "Flat";
+    /// <summary>The entered % (Basis='Percent') or the entered flat amount (Basis='Flat').</summary>
+    public decimal Value { get; set; }
+    /// <summary>The computed rupee amount either way — for a % charge, that's Value% of the
+    /// running subtotal (Basic Amount + every charge entered before this one), not the raw Basic
+    /// Amount, matching how these charges cascade on the real paper invoices.</summary>
+    public decimal Amount { get; set; }
 }
 
 public class PurchaseInvoiceDto
@@ -373,12 +407,17 @@ public class PurchaseInvoiceDto
     /// kept for print/search without a join; <see cref="EwayBillId"/> is the actual link.</summary>
     public string? EwayBillNo { get; set; }
     public int? EwayBillId { get; set; }
-    /// <summary>Drives which line layout and tax split (CGST+SGST vs IGST) this invoice uses.</summary>
+    /// <summary>Drives only the header CGST+SGST-vs-IGST split now — no longer affects line entry,
+    /// which is the same shape either way.</summary>
     public bool IsInterState { get; set; }
     public decimal BasicValue { get; set; }
-    /// <summary>Inter-State only — a flat % applied across all lines' BasicValue, same rate the
-    /// paper invoice shows on every line.</summary>
-    public decimal InsuranceValue { get; set; }
+    /// <summary>Sum of every Charges row's computed Amount.</summary>
+    public decimal ChargesTotal { get; set; }
+    public List<PurchaseInvoiceChargeDto> Charges { get; set; } = new();
+    /// <summary>The single invoice-wide GST rate — computed once against the whole Assessable
+    /// Value (TaxableValue = BasicValue + ChargesTotal), not per line. NULL on invoices booked
+    /// before this became header-level.</summary>
+    public decimal? GstPct { get; set; }
     public decimal TaxableValue { get; set; }
     public decimal CgstValue { get; set; }
     public decimal SgstValue { get; set; }
@@ -398,17 +437,22 @@ public class CreatePurchaseInvoiceLineRequest
 {
     public int ProductId { get; set; }
     public string? Description { get; set; }
-    // ----- Inter-State only -----
-    public decimal? ThicknessMm { get; set; }
-    public decimal? WidthCm { get; set; }
-    public decimal? LengthCm { get; set; }
-    public int? NoOfCrates { get; set; }
-    public int? SheetsPerCrate { get; set; }
-    // ----- Local only -----
+    /// <summary>Piece/case count off the paper — informational only; Area drives BasicValue/stock.
+    /// </summary>
     public decimal? Qty { get; set; }
-    // ----- common -----
+    public decimal Area { get; set; }
     public decimal Rate { get; set; }
-    public decimal? GstPct { get; set; }
+    public decimal? HolesQty { get; set; }
+    public decimal? HolesRate { get; set; }
+    public decimal? CutoutQty { get; set; }
+    public decimal? CutoutRate { get; set; }
+}
+
+public class CreatePurchaseInvoiceChargeRequest
+{
+    public string Label { get; set; } = "";
+    public string Basis { get; set; } = "Flat";
+    public decimal Value { get; set; }
 }
 
 public class CreatePurchaseInvoiceRequest
@@ -417,6 +461,7 @@ public class CreatePurchaseInvoiceRequest
     /// <summary>Optional — defaults to the 'MAIN' godown (same fallback CreateGrnRequest.GodownCode
     /// already uses) when not supplied.</summary>
     public int? GodownId { get; set; }
+    /// <summary>Drives only the header CGST+SGST-vs-IGST split.</summary>
     public bool IsInterState { get; set; }
     public int? PurchaseOrderId { get; set; }
     public int? GrnId { get; set; }
@@ -425,8 +470,11 @@ public class CreatePurchaseInvoiceRequest
     /// <summary>Selected from the Purchase &gt; E-way Bill Entry master. Optional — a Local invoice
     /// often has none. Must not already be linked to another purchase invoice.</summary>
     public int? EwayBillId { get; set; }
-    /// <summary>Inter-State only; ignored for Local invoices.</summary>
-    public decimal? InsurancePct { get; set; }
+    /// <summary>The single rate applied once to the whole invoice's Assessable Value.</summary>
+    public decimal GstPct { get; set; }
+    /// <summary>Applied in this order — a 'Percent' charge's base is the running total at that
+    /// point (Basic Amount + every charge before it), not the raw Basic Amount.</summary>
+    public List<CreatePurchaseInvoiceChargeRequest> Charges { get; set; } = new();
     public List<CreatePurchaseInvoiceLineRequest> Lines { get; set; } = new();
 }
 
@@ -441,16 +489,15 @@ public class UpdatePurchaseInvoiceRequest
     public int? EwayBillId { get; set; }
     public bool ClearEwayBill { get; set; }
     public DateTime? InvoiceDate { get; set; }
-    /// <summary>Pass to replace every line entirely (same shape as Create) — the invoice's own
-    /// IsInterState mode is fixed and can't be changed here, so lines must still match it. The
-    /// stock this invoice previously added is reversed first (refused with 409 if any of it has
-    /// already moved on elsewhere) then the new lines' stock is applied, exactly as at Create time.
-    /// Omit entirely (leave null) to patch only the header fields above and leave lines untouched.
-    /// </summary>
+    /// <summary>Pass to replace every line entirely (same shape as Create). The stock this invoice
+    /// previously added is reversed first (refused with 409 if any of it has already moved on
+    /// elsewhere) then the new lines' stock is applied, exactly as at Create time. Lines, Charges
+    /// and GstPct travel together — sending Lines without the other two would leave the invoice's
+    /// totals inconsistent, so all three are required together. Omit Lines entirely (leave null) to
+    /// patch only the header fields above and leave lines/charges/tax untouched.</summary>
     public List<CreatePurchaseInvoiceLineRequest>? Lines { get; set; }
-    /// <summary>Inter-State only, and only consulted when Lines is also sent. Omit to keep whatever
-    /// insurance % this invoice was originally booked with; pass 0 to remove it.</summary>
-    public decimal? InsurancePct { get; set; }
+    public List<CreatePurchaseInvoiceChargeRequest>? Charges { get; set; }
+    public decimal? GstPct { get; set; }
 }
 
 // ---------- Purchase: E-way Bill Entry (master, selected from a dropdown when booking a Purchase Invoice) ----------
