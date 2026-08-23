@@ -298,6 +298,9 @@ export interface InventoryStatusRow {
 export interface SupplierDto {
   supplierId: number; code: string; name: string; gstin?: string | null; phone?: string | null; mobile?: string | null
   email?: string | null; address?: string | null; stateName?: string | null; creditPeriodDays: number; isActive: boolean
+  /** True while no Purchase Order, Purchase Invoice, payment voucher or e-Way Bill entry
+   * references this supplier yet. */
+  canDelete: boolean
 }
 
 export interface PurchaseOrderLineDto { productId: number; productCode?: string | null; qty: number; rate: number; value: number }

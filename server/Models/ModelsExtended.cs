@@ -251,6 +251,11 @@ public class SupplierDto
     public string? StateName { get; set; }
     public int CreditPeriodDays { get; set; }
     public bool IsActive { get; set; }
+    /// <summary>True while no Purchase Order, Purchase Invoice, Voucher (payment) or e-Way Bill
+    /// entry references this supplier yet — a GRN is never independently checkable since every GRN
+    /// traces back through its own Purchase Order, whose SupplierId is what this already covers.
+    /// </summary>
+    public bool CanDelete { get; set; } = true;
 }
 
 public class PurchaseOrderLineDto
