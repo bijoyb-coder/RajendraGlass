@@ -152,6 +152,7 @@ public class ProductDto
     public decimal? StandardSheetLengthMm { get; set; }
     public decimal? StandardSheetWidthMm { get; set; }
     public bool IsActive { get; set; }
+    public bool CanDelete { get; set; } = true;
 }
 
 public class CustomerDto

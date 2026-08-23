@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Plus, X, Layers, Printer } from 'lucide-react'
-import { useCreateProductMutation, useListProductsQuery } from './mastersApi'
+import { Plus, X, Layers, Printer, Pencil } from 'lucide-react'
+import { useCreateProductMutation, useListProductsQuery, useUpdateProductMutation, useDeleteProductMutation } from './mastersApi'
 import {
   useDataGrid,
   SortIcon,
@@ -12,7 +12,10 @@ import {
   printReport,
   DATA_GRID_HEAD_ROW_CLASS,
   DATA_GRID_ROW_CLASS,
+  ActionTh,
+  DeleteRowAction,
 } from '../../components/DataGrid'
+import { alertError } from '../../lib/alerts'
 import type { ProductDto } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
@@ -22,10 +25,13 @@ type SortKey = 'code' | 'description' | 'thicknessMm' | 'colour' | 'sellingRate'
 
 export default function ProductsPage() {
   const { data, isLoading } = useListProductsQuery()
-  const [createProduct, { isLoading: saving }] = useCreateProductMutation()
+  const [createProduct, { isLoading: creating }] = useCreateProductMutation()
+  const [updateProduct, { isLoading: updating }] = useUpdateProductMutation()
+  const [deleteProduct] = useDeleteProductMutation()
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<Partial<ProductDto>>(emptyForm)
-  const [error, setError] = useState<string | null>(null)
+  const saving = creating || updating
 
   const {
     rows,
@@ -87,15 +93,41 @@ export default function ProductsPage() {
     })
   }
 
+  function openNew() {
+    setEditingId(null)
+    setForm(emptyForm)
+    setShowForm(true)
+  }
+
+  function openEdit(p: ProductDto) {
+    setEditingId(p.productId)
+    setForm({
+      code: p.code, description: p.description, category: p.category ?? '', brand: p.brand ?? '',
+      thicknessMm: p.thicknessMm ?? undefined, colour: p.colour ?? '', hsnCode: p.hsnCode ?? '',
+      gstRatePct: p.gstRatePct, stockUnit: p.stockUnit, sellingUnit: p.sellingUnit,
+      sellingRate: p.sellingRate ?? undefined, minSellingPrice: p.minSellingPrice ?? undefined,
+      standardSheetLengthMm: p.standardSheetLengthMm ?? undefined, standardSheetWidthMm: p.standardSheetWidthMm ?? undefined,
+    })
+    setShowForm(true)
+  }
+
+  function closeForm() {
+    setShowForm(false)
+    setEditingId(null)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
     try {
-      await createProduct(form).unwrap()
+      if (editingId) {
+        await updateProduct({ id: editingId, body: form }).unwrap()
+      } else {
+        await createProduct(form).unwrap()
+      }
       setForm(emptyForm)
-      setShowForm(false)
+      closeForm()
     } catch (err: any) {
-      setError(err?.data?.detail ?? 'Could not save the product.')
+      void alertError(err?.data?.title ?? 'Could not save', err?.data?.detail ?? 'The product could not be saved.')
     }
   }
 
@@ -106,14 +138,15 @@ export default function ProductsPage() {
           <h1 className="text-2xl font-bold text-brand-900">Products</h1>
           <p className="text-sm text-slate-500 mt-1">Glass SKUs — thickness, colour, brand, pricing.</p>
         </div>
-        <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
+        <button onClick={showForm ? closeForm : openNew} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
           {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? 'Cancel' : 'New Product'}
         </button>
       </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 grid sm:grid-cols-3 gap-4 animate-fade-in">
-          <Field label="Code *"><input required value={form.code} onChange={(e) => set('code', e.target.value)} className={inputClass} /></Field>
+          <h2 className="sm:col-span-3 text-sm font-semibold text-slate-700 -mb-2">{editingId ? 'Edit Product' : 'New Product'}</h2>
+          <Field label="Code *"><input required disabled={!!editingId} value={form.code} onChange={(e) => set('code', e.target.value)} className={`${inputClass} ${editingId ? 'bg-slate-100 text-slate-500' : ''}`} /></Field>
           <Field label="Description *" wide><input required value={form.description} onChange={(e) => set('description', e.target.value)} className={inputClass} /></Field>
           <Field label="Category"><input value={form.category ?? ''} onChange={(e) => set('category', e.target.value)} className={inputClass} /></Field>
           <Field label="Brand"><input value={form.brand ?? ''} onChange={(e) => set('brand', e.target.value)} className={inputClass} /></Field>
@@ -125,10 +158,9 @@ export default function ProductsPage() {
           <Field label="Min Selling Price"><input type="number" step="0.01" value={form.minSellingPrice ?? ''} onChange={(e) => set('minSellingPrice', Number(e.target.value))} className={inputClass} /></Field>
           <Field label="Standard Sheet Length (mm)"><input type="number" step="0.01" value={form.standardSheetLengthMm ?? ''} onChange={(e) => set('standardSheetLengthMm', e.target.value ? Number(e.target.value) : undefined)} className={inputClass} placeholder="Optional" /></Field>
           <Field label="Standard Sheet Width (mm)"><input type="number" step="0.01" value={form.standardSheetWidthMm ?? ''} onChange={(e) => set('standardSheetWidthMm', e.target.value ? Number(e.target.value) : undefined)} className={inputClass} placeholder="Optional" /></Field>
-          {error && <div className="sm:col-span-3 text-sm text-red-600">{error}</div>}
           <div className="sm:col-span-3 flex justify-end">
             <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">
-              {saving ? 'Saving…' : 'Save Product'}
+              {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Save Product'}
             </button>
           </div>
         </form>
@@ -163,13 +195,14 @@ export default function ProductsPage() {
                   Selling Rate <SortIcon column="sellingRate" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
                 <Th>Unit</Th>
+                <ActionTh />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={7} className="px-5 py-14 text-center text-slate-400">
                     <Layers size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No products match your search.' : 'No products yet.'}
                   </td>
@@ -183,6 +216,23 @@ export default function ProductsPage() {
                   <td className="px-5 py-3 text-slate-500">{p.colour ?? '—'}</td>
                   <td className="px-5 py-3 text-right font-semibold text-slate-800">{p.sellingRate ? `₹${p.sellingRate.toLocaleString('en-IN')}` : '—'}</td>
                   <td className="px-5 py-3 text-slate-500">{p.sellingUnit}</td>
+                  <td className="px-5 py-3 text-right">
+                    <div className="inline-flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(p)}
+                        title="Edit"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-brand-700 transition"
+                      >
+                        <Pencil size={13} /> Edit
+                      </button>
+                      <DeleteRowAction
+                        canDelete={p.canDelete}
+                        itemLabel={`Product ${p.description}`}
+                        onDelete={() => deleteProduct(p.productId).unwrap()}
+                      />
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
