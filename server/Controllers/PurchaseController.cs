@@ -40,6 +40,19 @@ public class SuppliersController(IDbConnectionFactory db) : ControllerBase
     }
 
     [RequirePermission("Supplier.Create")]
+    [HttpPut("{id:int}")]
+    public IActionResult Update(int id, [FromBody] SupplierDto dto)
+    {
+        using var conn = db.CreateConnection();
+        var rows = conn.Execute(
+            @"UPDATE Master.Supplier SET Code=@Code, Name=@Name, Gstin=@Gstin, Phone=@Phone, Mobile=@Mobile, Email=@Email,
+                     Address=@Address, StateName=@StateName, CreditPeriodDays=@CreditPeriodDays
+              WHERE SupplierId=@id",
+            new { id, dto.Code, dto.Name, dto.Gstin, dto.Phone, dto.Mobile, dto.Email, dto.Address, dto.StateName, dto.CreditPeriodDays });
+        return rows == 0 ? NotFound() : NoContent();
+    }
+
+    [RequirePermission("Supplier.Create")]
     [HttpPost]
     public IActionResult Create([FromBody] SupplierDto dto)
     {

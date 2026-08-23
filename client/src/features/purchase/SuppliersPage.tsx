@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Plus, X, Factory } from 'lucide-react'
-import { useListSuppliersQuery, useCreateSupplierMutation, useDeleteSupplierMutation } from './purchaseApi'
+import { Plus, X, Factory, Pencil } from 'lucide-react'
+import { useListSuppliersQuery, useCreateSupplierMutation, useUpdateSupplierMutation, useDeleteSupplierMutation } from './purchaseApi'
 import {
   useDataGrid,
   SortIcon,
@@ -22,11 +22,14 @@ type SortKey = 'code' | 'name' | 'gstin' | 'creditPeriodDays'
 
 export default function SuppliersPage() {
   const { data, isLoading } = useListSuppliersQuery()
-  const [createSupplier, { isLoading: saving }] = useCreateSupplierMutation()
+  const [createSupplier, { isLoading: creating }] = useCreateSupplierMutation()
+  const [updateSupplier, { isLoading: updating }] = useUpdateSupplierMutation()
   const [deleteSupplier] = useDeleteSupplierMutation()
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<Partial<SupplierDto>>(emptyForm)
   const [error, setError] = useState<string | null>(null)
+  const saving = creating || updating
 
   const {
     rows,
@@ -61,13 +64,39 @@ export default function SuppliersPage() {
 
   function set<K extends keyof SupplierDto>(key: K, value: SupplierDto[K]) { setForm((f) => ({ ...f, [key]: value })) }
 
+  function openNew() {
+    setEditingId(null)
+    setForm(emptyForm)
+    setError(null)
+    setShowForm(true)
+  }
+
+  function openEdit(s: SupplierDto) {
+    setEditingId(s.supplierId)
+    setForm({
+      code: s.code, name: s.name, gstin: s.gstin ?? '', phone: s.phone ?? '', email: s.email ?? '',
+      address: s.address ?? '', stateName: s.stateName ?? '', creditPeriodDays: s.creditPeriodDays,
+    })
+    setError(null)
+    setShowForm(true)
+  }
+
+  function closeForm() {
+    setShowForm(false)
+    setEditingId(null)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
     try {
-      await createSupplier(form).unwrap()
+      if (editingId) {
+        await updateSupplier({ id: editingId, body: form }).unwrap()
+      } else {
+        await createSupplier(form).unwrap()
+      }
       setForm(emptyForm)
-      setShowForm(false)
+      closeForm()
     } catch (err: any) {
       setError(err?.data?.detail ?? 'Could not save the supplier.')
     }
@@ -80,13 +109,14 @@ export default function SuppliersPage() {
           <h1 className="text-2xl font-bold text-brand-900">Suppliers</h1>
           <p className="text-sm text-slate-500 mt-1">Vendors of glass, hardware and consumables.</p>
         </div>
-        <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
+        <button onClick={showForm ? closeForm : openNew} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
           {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? 'Cancel' : 'New Supplier'}
         </button>
       </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 grid sm:grid-cols-3 gap-4 animate-fade-in">
+          <h2 className="sm:col-span-3 text-sm font-semibold text-slate-700 -mb-2">{editingId ? 'Edit Supplier' : 'New Supplier'}</h2>
           <div><label className="block text-xs font-semibold text-slate-600 mb-1">Code *</label><input required value={form.code} onChange={(e) => set('code', e.target.value)} className={inputClass} /></div>
           <div className="sm:col-span-2"><label className="block text-xs font-semibold text-slate-600 mb-1">Name *</label><input required value={form.name} onChange={(e) => set('name', e.target.value)} className={inputClass} /></div>
           <div><label className="block text-xs font-semibold text-slate-600 mb-1">GSTIN</label><input value={form.gstin ?? ''} onChange={(e) => set('gstin', e.target.value)} maxLength={15} className={inputClass} /></div>
@@ -96,7 +126,7 @@ export default function SuppliersPage() {
           <div><label className="block text-xs font-semibold text-slate-600 mb-1">Credit Period (days)</label><input type="number" value={form.creditPeriodDays ?? 0} onChange={(e) => set('creditPeriodDays', Number(e.target.value))} className={inputClass} /></div>
           {error && <div className="sm:col-span-3 text-sm text-red-600">{error}</div>}
           <div className="sm:col-span-3 flex justify-end">
-            <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">{saving ? 'Saving…' : 'Save Supplier'}</button>
+            <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">{saving ? 'Saving…' : editingId ? 'Save Changes' : 'Save Supplier'}</button>
           </div>
         </form>
       )}
@@ -147,11 +177,21 @@ export default function SuppliersPage() {
                   <td className="px-5 py-3 text-slate-500">{s.phone ?? s.mobile ?? '—'}</td>
                   <td className="px-5 py-3 text-slate-500">{s.creditPeriodDays} days</td>
                   <td className="px-5 py-3 text-right">
-                    <DeleteRowAction
-                      canDelete={s.canDelete}
-                      itemLabel={`Supplier ${s.name}`}
-                      onDelete={() => deleteSupplier(s.supplierId).unwrap()}
-                    />
+                    <div className="inline-flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(s)}
+                        title="Edit"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-brand-700 transition"
+                      >
+                        <Pencil size={13} /> Edit
+                      </button>
+                      <DeleteRowAction
+                        canDelete={s.canDelete}
+                        itemLabel={`Supplier ${s.name}`}
+                        onDelete={() => deleteSupplier(s.supplierId).unwrap()}
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}
