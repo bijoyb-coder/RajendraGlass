@@ -26,7 +26,11 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
     /// cutting/production, and inventory-movement documents -- deleting a product with any
     /// transaction history behind it would either fail on a raw FK constraint or silently orphan
     /// that history, so a product stays editable forever but only becomes deletable once none of
-    /// these exist for it.</summary>
+    /// these exist for it. StockBalance/RackStock are ledger rows, not transactions -- a godown or
+    /// rack can carry a zero-quantity row for a product that was set up but never actually moved
+    /// (e.g. seeded at zero, or fully consumed and left at 0), so those two only count as "in use"
+    /// once they actually hold a nonzero quantity; every other table here is a real document line,
+    /// so its mere existence is enough.</summary>
     private const string CanDeleteSql =
         @"CAST(CASE WHEN
             NOT EXISTS (SELECT 1 FROM Purchase.PurchaseOrderLine x WHERE x.ProductId = p.ProductId)
@@ -38,11 +42,11 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
             AND NOT EXISTS (SELECT 1 FROM Cutting.CuttingPlanLine x WHERE x.ProductId = p.ProductId)
             AND NOT EXISTS (SELECT 1 FROM Production.JobCard x WHERE x.ProductId = p.ProductId)
             AND NOT EXISTS (SELECT 1 FROM Inventory.StockMovement x WHERE x.ProductId = p.ProductId)
-            AND NOT EXISTS (SELECT 1 FROM Inventory.StockBalance x WHERE x.ProductId = p.ProductId)
+            AND NOT EXISTS (SELECT 1 FROM Inventory.StockBalance x WHERE x.ProductId = p.ProductId AND (x.QtyOnHand <> 0 OR x.QtyReserved <> 0 OR x.QtyBlocked <> 0 OR x.QtyDamaged <> 0))
             AND NOT EXISTS (SELECT 1 FROM Inventory.StockAdjustmentLine x WHERE x.ProductId = p.ProductId)
             AND NOT EXISTS (SELECT 1 FROM Inventory.StockTransferLine x WHERE x.ProductId = p.ProductId)
             AND NOT EXISTS (SELECT 1 FROM Inventory.Offcut x WHERE x.ProductId = p.ProductId)
-            AND NOT EXISTS (SELECT 1 FROM Inventory.RackStock x WHERE x.ProductId = p.ProductId)
+            AND NOT EXISTS (SELECT 1 FROM Inventory.RackStock x WHERE x.ProductId = p.ProductId AND x.QtyOnHand <> 0)
           THEN 1 ELSE 0 END AS BIT)";
 
     [HttpGet]
@@ -198,7 +202,10 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
                 tx.Rollback();
                 return Conflict(new ProblemResponse { Title = "Product has stock movements", Status = 409, ErrorCode = "PRODUCT_HAS_STOCK_MOVEMENT", Detail = "This product already has recorded stock movements; it cannot be deleted." });
             }
-            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Inventory.StockBalance WHERE ProductId = @id", new { id }, tx) > 0)
+            // StockBalance/RackStock are ledger rows, not transactions — a zero-quantity row (e.g.
+            // seeded at zero, or fully consumed and left at 0) doesn't mean the product was ever
+            // actually used, so only a nonzero one blocks delete; see CanDeleteSql above.
+            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Inventory.StockBalance WHERE ProductId = @id AND (QtyOnHand <> 0 OR QtyReserved <> 0 OR QtyBlocked <> 0 OR QtyDamaged <> 0)", new { id }, tx) > 0)
             {
                 tx.Rollback();
                 return Conflict(new ProblemResponse { Title = "Product has stock on hand", Status = 409, ErrorCode = "PRODUCT_HAS_STOCK_BALANCE", Detail = "This product already has a stock balance recorded; it cannot be deleted." });
@@ -218,11 +225,17 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
                 tx.Rollback();
                 return Conflict(new ProblemResponse { Title = "Product has offcuts", Status = 409, ErrorCode = "PRODUCT_HAS_OFFCUT", Detail = "This product already has offcut records; it cannot be deleted." });
             }
-            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Inventory.RackStock WHERE ProductId = @id", new { id }, tx) > 0)
+            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Inventory.RackStock WHERE ProductId = @id AND QtyOnHand <> 0", new { id }, tx) > 0)
             {
                 tx.Rollback();
                 return Conflict(new ProblemResponse { Title = "Product is placed on a rack", Status = 409, ErrorCode = "PRODUCT_HAS_RACK_STOCK", Detail = "This product already has rack stock recorded; it cannot be deleted." });
             }
+
+            // Any StockBalance/RackStock rows left at this point are zero-quantity placeholders
+            // (already proven above) — clean them up so they don't fail the product's FK
+            // constraint; there's no real inventory in them to lose.
+            conn.Execute("DELETE FROM Inventory.StockBalance WHERE ProductId = @id", new { id }, tx);
+            conn.Execute("DELETE FROM Inventory.RackStock WHERE ProductId = @id", new { id }, tx);
 
             conn.Execute("DELETE FROM Master.Product WHERE ProductId = @id", new { id }, tx);
             AuditLogger.LogDelete(conn, tx, User, HttpContext, "Product", id.ToString(), product);
