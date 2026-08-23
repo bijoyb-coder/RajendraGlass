@@ -37,6 +37,14 @@ export const mastersApi = api.injectEndpoints({
       query: (body) => ({ url: '/customers', method: 'POST', body }),
       invalidatesTags: ['Customer'],
     }),
+    updateCustomer: builder.mutation<void, { id: number; body: Partial<CustomerDto> }>({
+      query: ({ id, body }) => ({ url: `/customers/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['Customer'],
+    }),
+    deleteCustomer: builder.mutation<void, number>({
+      query: (id) => ({ url: `/customers/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Customer'],
+    }),
 
     listTransporters: builder.query<{ items: TransporterDto[] }, void>({
       query: () => '/transporters',
@@ -57,6 +65,8 @@ export const {
   useDeleteProductMutation,
   useListCustomersQuery,
   useCreateCustomerMutation,
+  useUpdateCustomerMutation,
+  useDeleteCustomerMutation,
   useListTransportersQuery,
   useListVehiclesQuery,
 } = mastersApi

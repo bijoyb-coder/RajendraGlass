@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { Plus, X, Users } from 'lucide-react'
-import { useCreateCustomerMutation, useListCustomersQuery } from './mastersApi'
+import { Plus, X, Users, Pencil } from 'lucide-react'
+import { useCreateCustomerMutation, useListCustomersQuery, useUpdateCustomerMutation, useDeleteCustomerMutation } from './mastersApi'
 import {
   useDataGrid,
   SortIcon,
@@ -10,7 +10,10 @@ import {
   DataGridPagination,
   DATA_GRID_HEAD_ROW_CLASS,
   DATA_GRID_ROW_CLASS,
+  ActionTh,
+  DeleteRowAction,
 } from '../../components/DataGrid'
+import { alertError } from '../../lib/alerts'
 import type { CustomerDto } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
@@ -20,10 +23,13 @@ type SortKey = 'code' | 'name' | 'customerType' | 'creditLimit'
 
 export default function CustomersPage() {
   const { data, isLoading } = useListCustomersQuery()
-  const [createCustomer, { isLoading: saving }] = useCreateCustomerMutation()
+  const [createCustomer, { isLoading: creating }] = useCreateCustomerMutation()
+  const [updateCustomer, { isLoading: updating }] = useUpdateCustomerMutation()
+  const [deleteCustomer] = useDeleteCustomerMutation()
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<Partial<CustomerDto>>(emptyForm)
-  const [error, setError] = useState<string | null>(null)
+  const saving = creating || updating
 
   const {
     rows,
@@ -60,19 +66,43 @@ export default function CustomersPage() {
     setForm((f) => ({ ...f, [key]: value }))
   }
 
+  function openNew() {
+    setEditingId(null)
+    setForm(emptyForm)
+    setShowForm(true)
+  }
+
+  function openEdit(c: CustomerDto) {
+    setEditingId(c.customerId)
+    setForm({
+      code: c.code, name: c.name, customerType: c.customerType, gstin: c.gstin ?? '', phone: c.phone ?? '',
+      mobile: c.mobile ?? '', email: c.email ?? '', billingAddress: c.billingAddress ?? '',
+      stateCode: c.stateCode ?? '', stateName: c.stateName ?? '', creditLimit: c.creditLimit, creditPeriodDays: c.creditPeriodDays,
+    })
+    setShowForm(true)
+  }
+
+  function closeForm() {
+    setShowForm(false)
+    setEditingId(null)
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
     if (!form.mobile?.trim()) {
-      setError('A phone number is mandatory for every customer.')
+      void alertError('Phone number required', 'A phone number is mandatory for every customer.')
       return
     }
     try {
-      await createCustomer(form).unwrap()
+      if (editingId) {
+        await updateCustomer({ id: editingId, body: form }).unwrap()
+      } else {
+        await createCustomer(form).unwrap()
+      }
       setForm(emptyForm)
-      setShowForm(false)
+      closeForm()
     } catch (err: any) {
-      setError(err?.data?.detail ?? 'Could not save the customer.')
+      void alertError(err?.data?.title ?? 'Could not save', err?.data?.detail ?? 'The customer could not be saved.')
     }
   }
 
@@ -83,14 +113,15 @@ export default function CustomersPage() {
           <h1 className="text-2xl font-bold text-brand-900">Customers</h1>
           <p className="text-sm text-slate-500 mt-1">Billing and delivery parties, credit terms.</p>
         </div>
-        <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
+        <button onClick={showForm ? closeForm : openNew} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
           {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? 'Cancel' : 'New Customer'}
         </button>
       </div>
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 grid sm:grid-cols-3 gap-4 animate-fade-in">
-          <Field label="Code *"><input required value={form.code} onChange={(e) => set('code', e.target.value)} className={inputClass} /></Field>
+          <h2 className="sm:col-span-3 text-sm font-semibold text-slate-700 -mb-2">{editingId ? 'Edit Customer' : 'New Customer'}</h2>
+          <Field label="Code *"><input required disabled={!!editingId} value={form.code} onChange={(e) => set('code', e.target.value)} className={`${inputClass} ${editingId ? 'bg-slate-100 text-slate-500' : ''}`} /></Field>
           <Field label="Name *" wide><input required value={form.name} onChange={(e) => set('name', e.target.value)} className={inputClass} /></Field>
           <Field label="Customer Type *">
             <select required value={form.customerType ?? 'Retail'} onChange={(e) => set('customerType', e.target.value as CustomerDto['customerType'])} className={inputClass}>
@@ -106,10 +137,9 @@ export default function CustomersPage() {
           <Field label="State"><input value={form.stateName ?? ''} onChange={(e) => set('stateName', e.target.value)} className={inputClass} /></Field>
           <Field label="Credit Limit"><input type="number" value={form.creditLimit ?? 0} onChange={(e) => set('creditLimit', Number(e.target.value))} className={inputClass} /></Field>
           <Field label="Credit Period (days)"><input type="number" value={form.creditPeriodDays ?? 0} onChange={(e) => set('creditPeriodDays', Number(e.target.value))} className={inputClass} /></Field>
-          {error && <div className="sm:col-span-3 text-sm text-red-600">{error}</div>}
           <div className="sm:col-span-3 flex justify-end">
             <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">
-              {saving ? 'Saving…' : 'Save Customer'}
+              {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Save Customer'}
             </button>
           </div>
         </form>
@@ -142,13 +172,14 @@ export default function CustomersPage() {
                   Credit Limit <SortIcon column="creditLimit" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
                 <Th>Status</Th>
+                <ActionTh />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={8} className="px-5 py-14 text-center text-slate-400">
                     <Users size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No customers match your search.' : 'No customers yet.'}
                   </td>
@@ -172,6 +203,23 @@ export default function CustomersPage() {
                     ) : (
                       <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">Active</span>
                     )}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    <div className="inline-flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(c)}
+                        title="Edit"
+                        className="inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-brand-700 transition"
+                      >
+                        <Pencil size={13} /> Edit
+                      </button>
+                      <DeleteRowAction
+                        canDelete={c.canDelete}
+                        itemLabel={`Customer ${c.name}`}
+                        onDelete={() => deleteCustomer(c.customerId).unwrap()}
+                      />
+                    </div>
                   </td>
                 </tr>
               ))}
