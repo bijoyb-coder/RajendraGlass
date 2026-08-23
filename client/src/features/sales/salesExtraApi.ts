@@ -38,7 +38,9 @@ export const salesExtraApi = api.injectEndpoints({
     }),
     deleteSalesOrder: builder.mutation<void, number>({
       query: (id) => ({ url: `/sales-orders/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['SalesOrder'],
+      // Deleting the order frees its Quotation to be deleted too (Quotation's CanDelete checks
+      // NOT EXISTS a Sales Order against it) — same reasoning as invoices freeing their order below.
+      invalidatesTags: ['SalesOrder', 'Quotation'],
     }),
   }),
 })
