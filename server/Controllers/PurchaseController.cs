@@ -43,26 +43,64 @@ public class SuppliersController(IDbConnectionFactory db) : ControllerBase
     [HttpPut("{id:int}")]
     public IActionResult Update(int id, [FromBody] SupplierDto dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.Code))
+            return UnprocessableEntity(new ProblemResponse { Title = "Code required", Status = 422, ErrorCode = "CODE_REQUIRED", Detail = "Supplier code is required." });
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return UnprocessableEntity(new ProblemResponse { Title = "Name required", Status = 422, ErrorCode = "NAME_REQUIRED", Detail = "Supplier name is required." });
+
         using var conn = db.CreateConnection();
-        var rows = conn.Execute(
-            @"UPDATE Master.Supplier SET Code=@Code, Name=@Name, Gstin=@Gstin, Phone=@Phone, Mobile=@Mobile, Email=@Email,
-                     Address=@Address, StateName=@StateName, CreditPeriodDays=@CreditPeriodDays
-              WHERE SupplierId=@id",
-            new { id, dto.Code, dto.Name, dto.Gstin, dto.Phone, dto.Mobile, dto.Email, dto.Address, dto.StateName, dto.CreditPeriodDays });
-        return rows == 0 ? NotFound() : NoContent();
+        var existing = conn.QueryFirstOrDefault<int?>(
+            "SELECT SupplierId FROM Master.Supplier WHERE Code = @Code AND SupplierId <> @id", new { dto.Code, id });
+        if (existing.HasValue)
+        {
+            return Conflict(new ProblemResponse { Title = "Duplicate code", Status = 409, ErrorCode = "DUPLICATE_CODE", Detail = $"A supplier with code '{dto.Code}' already exists." });
+        }
+
+        try
+        {
+            var rows = conn.Execute(
+                @"UPDATE Master.Supplier SET Code=@Code, Name=@Name, Gstin=@Gstin, Phone=@Phone, Mobile=@Mobile, Email=@Email,
+                         Address=@Address, StateName=@StateName, CreditPeriodDays=@CreditPeriodDays
+                  WHERE SupplierId=@id",
+                new { id, dto.Code, dto.Name, dto.Gstin, dto.Phone, dto.Mobile, dto.Email, dto.Address, dto.StateName, dto.CreditPeriodDays });
+            return rows == 0 ? NotFound() : NoContent();
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            return UnprocessableEntity(new ProblemResponse { Title = "Could not save", Status = 422, ErrorCode = "SAVE_FAILED", Detail = ex.Message });
+        }
     }
 
     [RequirePermission("Supplier.Create")]
     [HttpPost]
     public IActionResult Create([FromBody] SupplierDto dto)
     {
+        if (string.IsNullOrWhiteSpace(dto.Code))
+            return UnprocessableEntity(new ProblemResponse { Title = "Code required", Status = 422, ErrorCode = "CODE_REQUIRED", Detail = "Supplier code is required." });
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            return UnprocessableEntity(new ProblemResponse { Title = "Name required", Status = 422, ErrorCode = "NAME_REQUIRED", Detail = "Supplier name is required." });
+
         using var conn = db.CreateConnection();
-        var id = conn.ExecuteScalar<int>(
-            @"INSERT INTO Master.Supplier (Code, Name, Gstin, Phone, Mobile, Email, Address, StateName, CreditPeriodDays, IsActive)
-              OUTPUT INSERTED.SupplierId
-              VALUES (@Code, @Name, @Gstin, @Phone, @Mobile, @Email, @Address, @StateName, @CreditPeriodDays, 1)", dto);
-        dto.SupplierId = id;
-        return Created($"/api/v1/suppliers/{id}", dto);
+        var existing = conn.QueryFirstOrDefault<int?>(
+            "SELECT SupplierId FROM Master.Supplier WHERE Code = @Code", new { dto.Code });
+        if (existing.HasValue)
+        {
+            return Conflict(new ProblemResponse { Title = "Duplicate code", Status = 409, ErrorCode = "DUPLICATE_CODE", Detail = $"A supplier with code '{dto.Code}' already exists." });
+        }
+
+        try
+        {
+            var id = conn.ExecuteScalar<int>(
+                @"INSERT INTO Master.Supplier (Code, Name, Gstin, Phone, Mobile, Email, Address, StateName, CreditPeriodDays, IsActive)
+                  OUTPUT INSERTED.SupplierId
+                  VALUES (@Code, @Name, @Gstin, @Phone, @Mobile, @Email, @Address, @StateName, @CreditPeriodDays, 1)", dto);
+            dto.SupplierId = id;
+            return Created($"/api/v1/suppliers/{id}", dto);
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            return UnprocessableEntity(new ProblemResponse { Title = "Could not save", Status = 422, ErrorCode = "SAVE_FAILED", Detail = ex.Message });
+        }
     }
 
     /// <summary>Deletable only while nothing has ever been booked against this supplier — see

@@ -13,6 +13,7 @@ import {
   ActionTh,
   DeleteRowAction,
 } from '../../components/DataGrid'
+import { alertError } from '../../lib/alerts'
 import type { SupplierDto } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
@@ -28,7 +29,6 @@ export default function SuppliersPage() {
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<Partial<SupplierDto>>(emptyForm)
-  const [error, setError] = useState<string | null>(null)
   const saving = creating || updating
 
   const {
@@ -67,7 +67,6 @@ export default function SuppliersPage() {
   function openNew() {
     setEditingId(null)
     setForm(emptyForm)
-    setError(null)
     setShowForm(true)
   }
 
@@ -77,7 +76,6 @@ export default function SuppliersPage() {
       code: s.code, name: s.name, gstin: s.gstin ?? '', phone: s.phone ?? '', email: s.email ?? '',
       address: s.address ?? '', stateName: s.stateName ?? '', creditPeriodDays: s.creditPeriodDays,
     })
-    setError(null)
     setShowForm(true)
   }
 
@@ -88,7 +86,6 @@ export default function SuppliersPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
     try {
       if (editingId) {
         await updateSupplier({ id: editingId, body: form }).unwrap()
@@ -98,7 +95,7 @@ export default function SuppliersPage() {
       setForm(emptyForm)
       closeForm()
     } catch (err: any) {
-      setError(err?.data?.detail ?? 'Could not save the supplier.')
+      void alertError(err?.data?.title ?? 'Could not save', err?.data?.detail ?? 'The supplier could not be saved.')
     }
   }
 
@@ -124,7 +121,6 @@ export default function SuppliersPage() {
           <div><label className="block text-xs font-semibold text-slate-600 mb-1">Email</label><input value={form.email ?? ''} onChange={(e) => set('email', e.target.value)} className={inputClass} /></div>
           <div className="sm:col-span-2"><label className="block text-xs font-semibold text-slate-600 mb-1">Address</label><input value={form.address ?? ''} onChange={(e) => set('address', e.target.value)} className={inputClass} /></div>
           <div><label className="block text-xs font-semibold text-slate-600 mb-1">Credit Period (days)</label><input type="number" value={form.creditPeriodDays ?? 0} onChange={(e) => set('creditPeriodDays', Number(e.target.value))} className={inputClass} /></div>
-          {error && <div className="sm:col-span-3 text-sm text-red-600">{error}</div>}
           <div className="sm:col-span-3 flex justify-end">
             <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">{saving ? 'Saving…' : editingId ? 'Save Changes' : 'Save Supplier'}</button>
           </div>
