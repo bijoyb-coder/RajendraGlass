@@ -27,11 +27,17 @@ export const salesApi = api.injectEndpoints({
     }),
     cancelInvoice: builder.mutation<void, { id: number; reason: string }>({
       query: ({ id, reason }) => ({ url: `/invoices/${id}/cancel`, method: 'POST', body: { reason } }),
-      invalidatesTags: ['Invoice', 'Dashboard'],
+      // A cancelled invoice no longer counts against its Sales Order's CanDelete (the backend
+      // query filters WHERE Status <> 'Cancelled'), so the order becomes deletable again — same
+      // reasoning as createInvoice invalidating 'SalesOrder' below.
+      invalidatesTags: ['Invoice', 'Dashboard', 'SalesOrder'],
     }),
     deleteInvoice: builder.mutation<void, number>({
       query: (id) => ({ url: `/invoices/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Invoice', 'Dashboard'],
+      // Deleting the invoice frees its Sales Order to be deleted too — without this the Sales
+      // Orders list keeps showing the (now stale) "converted to invoice" state and hides the
+      // Delete action even though nothing references the order anymore.
+      invalidatesTags: ['Invoice', 'Dashboard', 'SalesOrder'],
     }),
     generateEInvoice: builder.mutation<EInvoiceResult, number>({
       query: (id) => ({ url: `/invoices/${id}/e-invoice`, method: 'POST' }),
