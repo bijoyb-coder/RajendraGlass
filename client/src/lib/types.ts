@@ -305,17 +305,42 @@ export interface GrnDto {
 }
 export interface CreateGrnRequest { purchaseOrderId: number; lines: GrnLineDto[] }
 
-/** One line entered directly off the supplier's paper tax invoice. Local lines only ever carry
- * qty/rate; Inter-State lines also carry the physical breakdown, which is how area (and so
- * basicValue) gets derived server-side. */
+/** One line entered directly off the supplier's paper tax invoice — same shape for Local and
+ * Inter-State alike: Area is typed straight off the paper (not derived from L×W×Thickness),
+ * BasicValue = Area × Rate. thicknessMm/widthCm/etc. are legacy-only (NULL on lines entered since
+ * the unified-column redesign; kept so older invoices still display their stored data). */
 export interface PurchaseInvoiceLineDto {
   productId: number; productCode?: string | null; productDescription?: string | null; description?: string | null
-  // ----- Inter-State only (null for Local lines) -----
+  // ----- legacy only -----
   thicknessMm?: number | null; widthCm?: number | null; lengthCm?: number | null
   noOfCrates?: number | null; sheetsPerCrate?: number | null
-  // ----- common -----
-  qty: number; area: number; rate: number; basicValue: number; gstPct: number
-  taxableValue: number; cgstAmount: number; sgstAmount: number; igstAmount: number; netValue: number
+  // ----- entered directly -----
+  /** Piece/case count off the paper — informational; Area drives BasicValue and stock. */
+  qty: number; area: number; rate: number; basicValue: number
+  /** Per-piece hole-drilling charge for this line: holesQty × holesRate. */
+  holesQty?: number | null; holesRate?: number | null; holesAmount: number
+  /** Per-piece cutout charge for this line: cutoutQty × cutoutRate. */
+  cutoutQty?: number | null; cutoutRate?: number | null; cutoutAmount: number
+  /** This line's assessable value: basicValue + holesAmount + cutoutAmount + its allocated share
+   * of the header charges. */
+  taxableValue: number
+  /** Informational only — GST is computed once at header level (see PurchaseInvoiceDto.gstPct);
+   * these are this line's proportional share, server-computed so the column always sums exactly
+   * to the header figure. */
+  cgstAmount: number; sgstAmount: number; igstAmount: number; netValue: number
+}
+
+/** One header-level charge (Admin Charge, Insurance, Freight, Energy, ...) — a free-form, ordered
+ * list matching whatever a given supplier's paper actually itemizes. */
+export interface PurchaseInvoiceChargeDto {
+  label: string
+  /** 'Percent' or 'Flat'. */
+  basis: 'Percent' | 'Flat'
+  /** The entered % (basis='Percent') or the entered flat amount (basis='Flat'). */
+  value: number
+  /** The computed rupee amount — for a % charge, Value% of the running subtotal at that point
+   * (Basic Amount + every charge entered before it), not the raw Basic Amount. */
+  amount: number
 }
 
 export interface PurchaseInvoiceDto {
@@ -329,11 +354,15 @@ export interface PurchaseInvoiceDto {
    * (see EwayBillDto) — a denormalized snapshot for display/search; ewayBillId is the actual link. */
   ewayBillNo?: string | null
   ewayBillId?: number | null
-  /** Drives which line layout and tax split (CGST+SGST vs IGST) this invoice uses. */
+  /** Drives only the header CGST+SGST-vs-IGST split now — line entry is the same shape either way. */
   isInterState: boolean
   basicValue: number
-  /** Inter-State only — a flat % applied across all lines' basicValue. */
-  insuranceValue: number
+  /** Sum of every charges row's computed amount. */
+  chargesTotal: number
+  charges: PurchaseInvoiceChargeDto[]
+  /** The single invoice-wide GST rate, applied once to taxableValue (Basic + Charges) — not per
+   * line. Null on invoices booked before this became header-level. */
+  gstPct?: number | null
   taxableValue: number; cgstValue: number; sgstValue: number; igstValue: number; roundOff: number
   totalValue: number; status: string
   /** True unless the stock this invoice added has since moved on (checked authoritatively at
@@ -344,23 +373,29 @@ export interface PurchaseInvoiceDto {
 
 export interface CreatePurchaseInvoiceLineRequest {
   productId: number; description?: string
-  // ----- Inter-State only -----
-  thicknessMm?: number; widthCm?: number; lengthCm?: number; noOfCrates?: number; sheetsPerCrate?: number
-  // ----- Local only -----
+  /** Piece/case count — informational only. */
   qty?: number
-  // ----- common -----
-  rate: number; gstPct?: number
+  area: number; rate: number
+  holesQty?: number; holesRate?: number
+  cutoutQty?: number; cutoutRate?: number
+}
+export interface CreatePurchaseInvoiceChargeRequest {
+  label: string; basis: 'Percent' | 'Flat'; value: number
 }
 export interface CreatePurchaseInvoiceRequest {
-  supplierId: number; isInterState: boolean
+  supplierId: number
+  /** Drives only the header CGST+SGST-vs-IGST split. */
+  isInterState: boolean
   /** Optional — defaults to the 'MAIN' godown server-side when not supplied. */
   godownId?: number
   purchaseOrderId?: number; grnId?: number
   supplierInvoiceNo?: string; invoiceDate?: string
   /** Selected from the Purchase > E-way Bill Entry dropdown; optional (Local invoices often have none). */
   ewayBillId?: number
-  /** Inter-State only; ignored for Local invoices. */
-  insurancePct?: number
+  /** The single rate applied once to the whole invoice's assessable value. */
+  gstPct: number
+  /** Applied in this order — a 'Percent' charge's base is the running total at that point. */
+  charges: CreatePurchaseInvoiceChargeRequest[]
   lines: CreatePurchaseInvoiceLineRequest[]
 }
 /** Fixes a wrong supplier reference number, e-Way Bill selection, date — and, unlike most other
@@ -371,12 +406,11 @@ export interface UpdatePurchaseInvoiceRequest {
   ewayBillId?: number
   clearEwayBill?: boolean
   invoiceDate?: string
-  /** Pass to replace every line entirely (same shape as Create) — must still match the invoice's
-   * own (fixed) isInterState mode. Omit to leave lines untouched. */
+  /** Pass together with charges/gstPct (all three travel together) to replace every line entirely
+   * (same shape as Create). Omit to leave lines/charges/tax untouched. */
   lines?: CreatePurchaseInvoiceLineRequest[]
-  /** Inter-State only, and only consulted when lines is also sent. Omit to keep the invoice's
-   * original insurance %; pass 0 to remove it. */
-  insurancePct?: number
+  charges?: CreatePurchaseInvoiceChargeRequest[]
+  gstPct?: number
 }
 
 /** Entered once off the supplier's e-Way Bill slip/QR printout, then picked from a dropdown when

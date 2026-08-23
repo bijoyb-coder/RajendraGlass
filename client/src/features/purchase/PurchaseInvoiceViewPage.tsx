@@ -4,7 +4,7 @@ import { Printer, ArrowLeft, Pencil, X, Plus, Trash2 } from 'lucide-react'
 import { useGetPurchaseInvoiceQuery, useUpdatePurchaseInvoiceMutation, useListEwayBillsQuery } from './purchaseApi'
 import { useListProductsQuery } from '../masters/mastersApi'
 import Logo from '../../components/Logo'
-import type { CreatePurchaseInvoiceLineRequest } from '../../lib/types'
+import type { CreatePurchaseInvoiceLineRequest, CreatePurchaseInvoiceChargeRequest } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
 function money(n: number) {
@@ -14,40 +14,30 @@ function money(n: number) {
 interface LineRow extends CreatePurchaseInvoiceLineRequest {
   key: string
 }
+interface ChargeRow extends CreatePurchaseInvoiceChargeRequest {
+  key: string
+}
 
 function emptyLine(): LineRow {
-  return { key: crypto.randomUUID(), productId: 0, rate: 0 }
+  return { key: crypto.randomUUID(), productId: 0, area: 0, rate: 0 }
+}
+function emptyCharge(): ChargeRow {
+  return { key: crypto.randomUUID(), label: '', basis: 'Flat', value: 0 }
 }
 
-/** Same convention PurchaseInvoiceCreatePage uses: rate x thickness gives the effective per-sqm
- * rate for Inter-State lines; Local lines are the plain qty x rate a Local invoice states directly.
- * insurancePct (Inter-State only) is each line's own share of insurance, taxed along with the rest
- * of that line's value, matching PurchaseController.PriceInsertLinesAndMoveStock. Duplicated here
- * (not shared) because it's the client-side live-preview mirror of the server's authoritative
- * PurchaseInvoiceLinePricing — same reasoning Create's own copy documents. */
-function priceLine(line: LineRow, isInterState: boolean, gstPct: number, insurancePct: number) {
-  let area: number, basic: number
-  if (isInterState) {
-    const t = line.thicknessMm || 0, w = line.widthCm || 0, l = line.lengthCm || 0
-    const crates = line.noOfCrates || 0, sheets = line.sheetsPerCrate || 0
-    const qty = crates * sheets
-    const perPieceArea = (l / 100) * (w / 100)
-    area = perPieceArea * qty
-    basic = area * t * (line.rate || 0)
-  } else {
-    area = line.qty || 0
-    basic = area * (line.rate || 0)
-  }
-  const insurance = isInterState && insurancePct ? (basic * insurancePct) / 100 : 0
-  const taxable = basic + insurance
-  const tax = (taxable * gstPct) / 100
-  return { area, basic, insurance, taxable, tax }
+/** Same shape for Local and Inter-State — mirrors PurchaseController.PriceInsertLinesAndMoveStock
+ * exactly, for a live client-side preview while editing. */
+function priceLine(line: LineRow) {
+  const basic = (line.area || 0) * (line.rate || 0)
+  const holesAmount = (line.holesQty || 0) * (line.holesRate || 0)
+  const cutoutAmount = (line.cutoutQty || 0) * (line.cutoutRate || 0)
+  return { basic, holesAmount, cutoutAmount, lineTotal: basic + holesAmount + cutoutAmount }
 }
 
-/** Purchase Invoice — entered directly from the supplier's paper tax invoice (Local or
- * Inter-State), stock added on save. Editing the lines reverses the stock this invoice added and
- * re-applies it for the new lines (refused if any of it has already moved on elsewhere) — the
- * Local/Inter-State mode itself is fixed and can't be changed here. */
+/** Purchase Invoice — entered directly from the supplier's paper tax invoice, stock added on save.
+ * Editing the lines reverses the stock this invoice added and re-applies it for the new lines
+ * (refused if any of it has already moved on elsewhere) — the Local/Inter-State mode itself is
+ * fixed and can't be changed here, only which tax split it drives. */
 export default function PurchaseInvoiceViewPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -60,25 +50,26 @@ export default function PurchaseInvoiceViewPage() {
   const selectableEwayBills = ewayBills?.items.filter((eb) => !eb.isUsed || eb.ewayBillId === pi?.ewayBillId) ?? []
 
   const [editing, setEditing] = useState(false)
-  const [form, setForm] = useState<{ supplierInvoiceNo: string; ewayBillId: number | ''; invoiceDate: string; insurancePct: number | '' }>({ supplierInvoiceNo: '', ewayBillId: '', invoiceDate: '', insurancePct: '' })
+  const [form, setForm] = useState<{ supplierInvoiceNo: string; ewayBillId: number | ''; invoiceDate: string; gstPct: number | '' }>({ supplierInvoiceNo: '', ewayBillId: '', invoiceDate: '', gstPct: '' })
   const [lines, setLines] = useState<LineRow[]>([])
+  const [charges, setCharges] = useState<ChargeRow[]>([])
   const [error, setError] = useState<string | null>(null)
 
   function openEdit() {
     if (!pi) return
-    const impliedInsurancePct = pi.basicValue > 0 ? Number(((pi.insuranceValue / pi.basicValue) * 100).toFixed(3)) : 0
     setForm({
       supplierInvoiceNo: pi.supplierInvoiceNo ?? '',
       ewayBillId: pi.ewayBillId ?? '',
       invoiceDate: pi.invoiceDate.slice(0, 10),
-      insurancePct: pi.isInterState && impliedInsurancePct > 0 ? impliedInsurancePct : '',
+      gstPct: pi.gstPct ?? 18,
     })
     setLines(pi.lines.map((l) => ({
       key: crypto.randomUUID(), productId: l.productId, description: l.description ?? undefined,
-      thicknessMm: l.thicknessMm ?? undefined, widthCm: l.widthCm ?? undefined, lengthCm: l.lengthCm ?? undefined,
-      noOfCrates: l.noOfCrates ?? undefined, sheetsPerCrate: l.sheetsPerCrate ?? undefined,
-      qty: l.qty, rate: l.rate, gstPct: l.gstPct,
+      qty: l.qty, area: l.area, rate: l.rate,
+      holesQty: l.holesQty ?? undefined, holesRate: l.holesRate ?? undefined,
+      cutoutQty: l.cutoutQty ?? undefined, cutoutRate: l.cutoutRate ?? undefined,
     })))
+    setCharges(pi.charges.map((c) => ({ key: crypto.randomUUID(), label: c.label, basis: c.basis, value: c.value })))
     setError(null)
     setEditing(true)
   }
@@ -87,13 +78,13 @@ export default function PurchaseInvoiceViewPage() {
   function removeLine(key: string) { setLines((prev) => prev.filter((l) => l.key !== key)) }
   function updateLine(key: string, patch: Partial<LineRow>) { setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l))) }
 
+  function addCharge() { setCharges((prev) => [...prev, emptyCharge()]) }
+  function removeCharge(key: string) { setCharges((prev) => prev.filter((c) => c.key !== key)) }
+  function updateCharge(key: string, patch: Partial<ChargeRow>) { setCharges((prev) => prev.map((c) => (c.key === key ? { ...c, ...patch } : c))) }
+
   function onProductChange(key: string, productId: number) {
     const product = products?.items.find((p) => p.productId === productId)
     updateLine(key, { productId, rate: product?.purchaseRate ?? 0 })
-  }
-
-  function gstFor(line: LineRow) {
-    return line.gstPct ?? products?.items.find((p) => p.productId === line.productId)?.gstRatePct ?? 18
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -101,11 +92,10 @@ export default function PurchaseInvoiceViewPage() {
     setError(null)
     if (!pi) return
 
-    const isInterState = pi.isInterState
-    const validLines = lines.filter((l) => l.productId && l.rate > 0 && (isInterState
-      ? l.thicknessMm && l.widthCm && l.lengthCm && l.noOfCrates && l.sheetsPerCrate
-      : l.qty && l.qty > 0))
-    if (validLines.length === 0) { setError('Add at least one valid line item — every field for this invoice\'s type is required.'); return }
+    const validLines = lines.filter((l) => l.productId && l.area > 0 && l.rate > 0)
+    if (validLines.length === 0) { setError('Add at least one valid line item — Product, Area and Rate are required.'); return }
+    const invalidCharge = charges.find((c) => !c.label.trim())
+    if (invalidCharge) { setError('Every charge needs a label.'); return }
 
     try {
       await updateInvoice({
@@ -115,10 +105,12 @@ export default function PurchaseInvoiceViewPage() {
           ewayBillId: form.ewayBillId ? Number(form.ewayBillId) : undefined,
           clearEwayBill: !form.ewayBillId,
           invoiceDate: form.invoiceDate,
-          insurancePct: isInterState ? Number(form.insurancePct) || 0 : undefined,
-          lines: validLines.map((l) => (isInterState
-            ? { productId: l.productId, description: l.description, thicknessMm: l.thicknessMm, widthCm: l.widthCm, lengthCm: l.lengthCm, noOfCrates: l.noOfCrates, sheetsPerCrate: l.sheetsPerCrate, rate: l.rate, gstPct: l.gstPct }
-            : { productId: l.productId, description: l.description, qty: l.qty, rate: l.rate, gstPct: l.gstPct })),
+          gstPct: Number(form.gstPct) || 0,
+          charges: charges.map((c) => ({ label: c.label, basis: c.basis, value: c.value || 0 })),
+          lines: validLines.map((l) => ({
+            productId: l.productId, description: l.description, qty: l.qty, area: l.area, rate: l.rate,
+            holesQty: l.holesQty, holesRate: l.holesRate, cutoutQty: l.cutoutQty, cutoutRate: l.cutoutRate,
+          })),
         },
       }).unwrap()
       setEditing(false)
@@ -178,12 +170,10 @@ export default function PurchaseInvoiceViewPage() {
               <label className="block text-xs font-semibold text-slate-600 mb-1">Invoice Date *</label>
               <input type="date" required max={new Date().toISOString().slice(0, 10)} value={form.invoiceDate} onChange={(e) => setForm((f) => ({ ...f, invoiceDate: e.target.value }))} className={inputClass} />
             </div>
-            {pi.isInterState && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Insurance %</label>
-                <input type="number" min={0} step="0.001" value={form.insurancePct} onChange={(e) => setForm((f) => ({ ...f, insurancePct: e.target.value ? Number(e.target.value) : '' }))} className={inputClass} placeholder="e.g. 0.323" />
-              </div>
-            )}
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">GST % *</label>
+              <input type="number" required min={0} step="0.01" value={form.gstPct} onChange={(e) => setForm((f) => ({ ...f, gstPct: e.target.value ? Number(e.target.value) : '' }))} className={inputClass} />
+            </div>
           </div>
 
           <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -198,28 +188,20 @@ export default function PurchaseInvoiceViewPage() {
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-100">
                     <th className="px-4 py-2.5 font-medium min-w-[200px]">Product</th>
-                    {pi.isInterState ? (
-                      <>
-                        <th className="px-4 py-2.5 font-medium w-24">Thick (mm)</th>
-                        <th className="px-4 py-2.5 font-medium w-24">Width (cm)</th>
-                        <th className="px-4 py-2.5 font-medium w-24">Length (cm)</th>
-                        <th className="px-4 py-2.5 font-medium w-24">No. Crates</th>
-                        <th className="px-4 py-2.5 font-medium w-24">Sheets/Crate</th>
-                        <th className="px-4 py-2.5 font-medium w-28">Rate (per mm)</th>
-                      </>
-                    ) : (
-                      <>
-                        <th className="px-4 py-2.5 font-medium w-32">Qty (sqm)</th>
-                        <th className="px-4 py-2.5 font-medium w-28">Rate</th>
-                      </>
-                    )}
-                    <th className="px-4 py-2.5 font-medium w-32 text-right">Value</th>
+                    <th className="px-4 py-2.5 font-medium w-20">Qty</th>
+                    <th className="px-4 py-2.5 font-medium w-24">Area (sqm)</th>
+                    <th className="px-4 py-2.5 font-medium w-24">Rate</th>
+                    <th className="px-4 py-2.5 font-medium w-20">Holes Qty</th>
+                    <th className="px-4 py-2.5 font-medium w-24">Holes Rate</th>
+                    <th className="px-4 py-2.5 font-medium w-20">Cutout Qty</th>
+                    <th className="px-4 py-2.5 font-medium w-24">Cutout Rate</th>
+                    <th className="px-4 py-2.5 font-medium w-32 text-right">Line Total</th>
                     <th className="w-10" />
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {lines.map((line) => {
-                    const { basic } = priceLine(line, pi.isInterState, gstFor(line), Number(form.insurancePct) || 0)
+                    const { lineTotal } = priceLine(line)
                     return (
                       <tr key={line.key}>
                         <td className="px-4 py-2">
@@ -228,22 +210,14 @@ export default function PurchaseInvoiceViewPage() {
                             {products?.items.map((p) => <option key={p.productId} value={p.productId}>{p.code} — {p.description}</option>)}
                           </select>
                         </td>
-                        {pi.isInterState ? (
-                          <>
-                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.thicknessMm ?? ''} onChange={(e) => updateLine(line.key, { thicknessMm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.widthCm ?? ''} onChange={(e) => updateLine(line.key, { widthCm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.lengthCm ?? ''} onChange={(e) => updateLine(line.key, { lengthCm: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                            <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.noOfCrates ?? ''} onChange={(e) => updateLine(line.key, { noOfCrates: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                            <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.sheetsPerCrate ?? ''} onChange={(e) => updateLine(line.key, { sheetsPerCrate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
-                          </>
-                        ) : (
-                          <>
-                            <td className="px-4 py-2"><input type="number" min={0} step="0.0001" value={line.qty ?? ''} onChange={(e) => updateLine(line.key, { qty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                            <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
-                          </>
-                        )}
-                        <td className="px-4 py-2 text-right font-medium text-slate-700">{money(basic)}</td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.qty ?? ''} onChange={(e) => updateLine(line.key, { qty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="0.001" value={line.area || ''} onChange={(e) => updateLine(line.key, { area: Number(e.target.value) })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.holesQty ?? ''} onChange={(e) => updateLine(line.key, { holesQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.holesRate ?? ''} onChange={(e) => updateLine(line.key, { holesRate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.cutoutQty ?? ''} onChange={(e) => updateLine(line.key, { cutoutQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.cutoutRate ?? ''} onChange={(e) => updateLine(line.key, { cutoutRate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                        <td className="px-4 py-2 text-right font-medium text-slate-700">{money(lineTotal)}</td>
                         <td className="px-2">
                           <button type="button" onClick={() => removeLine(line.key)} className="text-slate-400 hover:text-red-500 transition">
                             <Trash2 size={15} />
@@ -255,6 +229,48 @@ export default function PurchaseInvoiceViewPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="border border-slate-200 rounded-lg overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50">
+              <h3 className="text-sm font-semibold text-slate-700">Charges</h3>
+              <button type="button" onClick={addCharge} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700">
+                <Plus size={15} /> Add Charge
+              </button>
+            </div>
+            {charges.length > 0 && (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-100">
+                      <th className="px-4 py-2.5 font-medium min-w-[200px]">Label</th>
+                      <th className="px-4 py-2.5 font-medium w-32">Basis</th>
+                      <th className="px-4 py-2.5 font-medium w-28">Value</th>
+                      <th className="w-10" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {charges.map((c) => (
+                      <tr key={c.key}>
+                        <td className="px-4 py-2"><input value={c.label} onChange={(e) => updateCharge(c.key, { label: e.target.value })} className={inputClass} placeholder="e.g. Admin Charge" /></td>
+                        <td className="px-4 py-2">
+                          <select value={c.basis} onChange={(e) => updateCharge(c.key, { basis: e.target.value as 'Percent' | 'Flat' })} className={inputClass}>
+                            <option value="Flat">Flat ₹</option>
+                            <option value="Percent">% of running total</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-2"><input type="number" step="0.01" value={c.value || ''} onChange={(e) => updateCharge(c.key, { value: Number(e.target.value) })} className={inputClass} /></td>
+                        <td className="px-2">
+                          <button type="button" onClick={() => removeCharge(c.key)} className="text-slate-400 hover:text-red-500 transition">
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {error && <div className="text-sm text-red-600">{error}</div>}
@@ -293,23 +309,14 @@ export default function PurchaseInvoiceViewPage() {
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-200">
                 <th className="py-2 font-medium">Product</th>
-                {pi.isInterState ? (
-                  <>
-                    <th className="py-2 font-medium text-right">Thick (mm)</th>
-                    <th className="py-2 font-medium text-right">W × L (cm)</th>
-                    <th className="py-2 font-medium text-right">Crates × Sheets</th>
-                    <th className="py-2 font-medium text-right">Area (sqm)</th>
-                    <th className="py-2 font-medium text-right">Rate (per mm)</th>
-                  </>
-                ) : (
-                  <>
-                    <th className="py-2 font-medium text-right">Qty (sqm)</th>
-                    <th className="py-2 font-medium text-right">Rate</th>
-                  </>
-                )}
+                <th className="py-2 font-medium text-right">Qty</th>
+                <th className="py-2 font-medium text-right">Area (sqm)</th>
+                <th className="py-2 font-medium text-right">Rate</th>
+                <th className="py-2 font-medium text-right">Holes</th>
+                <th className="py-2 font-medium text-right">Cutout</th>
                 <th className="py-2 font-medium text-right">Basic Value</th>
-                {pi.isInterState && pi.insuranceValue > 0 && <th className="py-2 font-medium text-right print:hidden">Insurance</th>}
-                <th className="py-2 font-medium text-right print:hidden">IGST</th>
+                {pi.chargesTotal > 0 && <th className="py-2 font-medium text-right print:hidden">Charges</th>}
+                <th className="py-2 font-medium text-right print:hidden">{pi.isInterState ? 'IGST' : 'CGST+SGST'}</th>
                 <th className="py-2 font-medium text-right">Net Value</th>
               </tr>
             </thead>
@@ -320,23 +327,14 @@ export default function PurchaseInvoiceViewPage() {
                     <div className="font-medium text-slate-800">{l.description ?? l.productDescription}</div>
                     <div className="text-xs text-slate-400">{l.productCode}</div>
                   </td>
-                  {pi.isInterState ? (
-                    <>
-                      <td className="py-2.5 text-right">{l.thicknessMm ?? '—'}</td>
-                      <td className="py-2.5 text-right">{l.widthCm ?? '—'} × {l.lengthCm ?? '—'}</td>
-                      <td className="py-2.5 text-right">{l.noOfCrates ?? '—'} × {l.sheetsPerCrate ?? '—'}</td>
-                      <td className="py-2.5 text-right">{money(l.area)}</td>
-                      <td className="py-2.5 text-right">{money(l.rate)}</td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="py-2.5 text-right">{money(l.qty)}</td>
-                      <td className="py-2.5 text-right">{money(l.rate)}</td>
-                    </>
-                  )}
+                  <td className="py-2.5 text-right">{l.qty || '—'}</td>
+                  <td className="py-2.5 text-right">{money(l.area)}</td>
+                  <td className="py-2.5 text-right">{money(l.rate)}</td>
+                  <td className="py-2.5 text-right">{l.holesAmount > 0 ? money(l.holesAmount) : '—'}</td>
+                  <td className="py-2.5 text-right">{l.cutoutAmount > 0 ? money(l.cutoutAmount) : '—'}</td>
                   <td className="py-2.5 text-right">{money(l.basicValue)}</td>
-                  {pi.isInterState && pi.insuranceValue > 0 && <td className="py-2.5 text-right text-slate-500 print:hidden">{money(l.taxableValue - l.basicValue)}</td>}
-                  <td className="py-2.5 text-right text-slate-500 print:hidden">{money(l.igstAmount)}</td>
+                  {pi.chargesTotal > 0 && <td className="py-2.5 text-right text-slate-500 print:hidden">{money(l.taxableValue - l.basicValue - l.holesAmount - l.cutoutAmount)}</td>}
+                  <td className="py-2.5 text-right text-slate-500 print:hidden">{money(pi.isInterState ? l.igstAmount : l.cgstAmount + l.sgstAmount)}</td>
                   <td className="py-2.5 text-right font-medium">{money(l.netValue)}</td>
                 </tr>
               ))}
@@ -346,9 +344,9 @@ export default function PurchaseInvoiceViewPage() {
 
         <div className="flex justify-end mb-6">
           <div className="w-72 space-y-1.5 text-sm">
-            <Row label="Basic Value" value={money(pi.basicValue)} />
-            {pi.isInterState && pi.insuranceValue > 0 && <Row label="Insurance" value={money(pi.insuranceValue)} />}
-            <Row label="Taxable Value" value={money(pi.taxableValue)} />
+            <Row label="Basic Amount" value={money(pi.basicValue)} />
+            {pi.charges.map((c, i) => <Row key={i} label={c.label} value={money(c.amount)} />)}
+            <Row label="Assessable Value" value={money(pi.taxableValue)} />
             {pi.cgstValue > 0 && <Row label="CGST" value={money(pi.cgstValue)} />}
             {pi.sgstValue > 0 && <Row label="SGST" value={money(pi.sgstValue)} />}
             {pi.igstValue > 0 && <Row label="IGST" value={money(pi.igstValue)} />}
