@@ -146,6 +146,11 @@ public class ProductDto
     public decimal? PurchaseRate { get; set; }
     public decimal? SellingRate { get; set; }
     public decimal? MinSellingPrice { get; set; }
+    /// <summary>The size a full sheet of this product is normally stocked in — optional; when set,
+    /// drives the "≈ N sheets" report readout and lets a sale that cuts a fresh sheet automatically
+    /// log the remainder as a reusable offcut (see OffcutAllocation.DeductStockAndLogOffcut).</summary>
+    public decimal? StandardSheetLengthMm { get; set; }
+    public decimal? StandardSheetWidthMm { get; set; }
     public bool IsActive { get; set; }
 }
 

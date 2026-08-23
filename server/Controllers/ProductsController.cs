@@ -27,7 +27,7 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
     {
         using var conn = db.CreateConnection();
         var sql = @"SELECT ProductId, Code, Description, Category, Brand, ThicknessMm, Colour, HsnCode, GstRatePct,
-                            StockUnit, SellingUnit, PurchaseRate, SellingRate, MinSellingPrice, IsActive
+                            StockUnit, SellingUnit, StandardSheetLengthMm, StandardSheetWidthMm, PurchaseRate, SellingRate, MinSellingPrice, IsActive
                      FROM Master.Product
                      WHERE (@activeOnly = 0 OR IsActive = 1)
                        AND (@search IS NULL OR Code LIKE '%' + @search + '%' OR Description LIKE '%' + @search + '%')
@@ -43,7 +43,7 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
         using var conn = db.CreateConnection();
         var product = conn.QueryFirstOrDefault<ProductDto>(
             @"SELECT ProductId, Code, Description, Category, Brand, ThicknessMm, Colour, HsnCode, GstRatePct,
-                     StockUnit, SellingUnit, PurchaseRate, SellingRate, MinSellingPrice, IsActive
+                     StockUnit, SellingUnit, StandardSheetLengthMm, StandardSheetWidthMm, PurchaseRate, SellingRate, MinSellingPrice, IsActive
               FROM Master.Product WHERE ProductId = @id", new { id });
         if (product is null) return NotFound();
         if (!CanViewCost) product.PurchaseRate = null;
@@ -56,9 +56,9 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
     {
         using var conn = db.CreateConnection();
         var id = conn.ExecuteScalar<int>(
-            @"INSERT INTO Master.Product (Code, Description, Category, Brand, ThicknessMm, Colour, HsnCode, GstRatePct, StockUnit, SellingUnit, PurchaseRate, SellingRate, MinSellingPrice, IsActive)
+            @"INSERT INTO Master.Product (Code, Description, Category, Brand, ThicknessMm, Colour, HsnCode, GstRatePct, StockUnit, SellingUnit, StandardSheetLengthMm, StandardSheetWidthMm, PurchaseRate, SellingRate, MinSellingPrice, IsActive)
               OUTPUT INSERTED.ProductId
-              VALUES (@Code, @Description, @Category, @Brand, @ThicknessMm, @Colour, @HsnCode, @GstRatePct, @StockUnit, @SellingUnit, @PurchaseRate, @SellingRate, @MinSellingPrice, 1)",
+              VALUES (@Code, @Description, @Category, @Brand, @ThicknessMm, @Colour, @HsnCode, @GstRatePct, @StockUnit, @SellingUnit, @StandardSheetLengthMm, @StandardSheetWidthMm, @PurchaseRate, @SellingRate, @MinSellingPrice, 1)",
             dto);
         dto.ProductId = id;
         return CreatedAtAction(nameof(Get), new { id }, dto);
@@ -72,8 +72,9 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
         var rows = conn.Execute(
             @"UPDATE Master.Product SET Description=@Description, Category=@Category, Brand=@Brand, ThicknessMm=@ThicknessMm,
                      Colour=@Colour, HsnCode=@HsnCode, GstRatePct=@GstRatePct, StockUnit=@StockUnit, SellingUnit=@SellingUnit,
+                     StandardSheetLengthMm=@StandardSheetLengthMm, StandardSheetWidthMm=@StandardSheetWidthMm,
                      PurchaseRate=@PurchaseRate, SellingRate=@SellingRate, MinSellingPrice=@MinSellingPrice
-              WHERE ProductId=@id", new { id, dto.Description, dto.Category, dto.Brand, dto.ThicknessMm, dto.Colour, dto.HsnCode, dto.GstRatePct, dto.StockUnit, dto.SellingUnit, dto.PurchaseRate, dto.SellingRate, dto.MinSellingPrice });
+              WHERE ProductId=@id", new { id, dto.Description, dto.Category, dto.Brand, dto.ThicknessMm, dto.Colour, dto.HsnCode, dto.GstRatePct, dto.StockUnit, dto.SellingUnit, dto.StandardSheetLengthMm, dto.StandardSheetWidthMm, dto.PurchaseRate, dto.SellingRate, dto.MinSellingPrice });
         return rows == 0 ? NotFound() : NoContent();
     }
 

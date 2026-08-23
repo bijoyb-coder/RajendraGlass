@@ -538,6 +538,7 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         using var conn = db.CreateConnection();
         var rows = conn.Query<OffcutDto>(
             @"SELECT o.OffcutId, o.OffcutCode, o.ProductId, p.Code AS ProductCode, o.LengthMm, o.WidthMm, o.AreaSqft,
+                     o.AreaInStockUnit, o.StockUnit, o.SourceDocType, o.SourceDocId, o.ConsumedByDocType, o.ConsumedByDocId,
                      o.GodownId, g.Name AS GodownName, o.Status, o.CreatedOn
               FROM Inventory.Offcut o JOIN Master.Product p ON p.ProductId = o.ProductId JOIN Company.Godown g ON g.GodownId = o.GodownId
               WHERE (@productId IS NULL OR o.ProductId = @productId) AND (@status IS NULL OR o.Status = @status)
@@ -552,6 +553,7 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         // Best fit first (least wasted area), then oldest first — SDD 11.2.
         var rows = conn.Query<OffcutDto>(
             @"SELECT TOP 10 o.OffcutId, o.OffcutCode, o.ProductId, p.Code AS ProductCode, o.LengthMm, o.WidthMm, o.AreaSqft,
+                     o.AreaInStockUnit, o.StockUnit, o.SourceDocType, o.SourceDocId, o.ConsumedByDocType, o.ConsumedByDocId,
                      o.GodownId, g.Name AS GodownName, o.Status, o.CreatedOn
               FROM Inventory.Offcut o JOIN Master.Product p ON p.ProductId = o.ProductId JOIN Company.Godown g ON g.GodownId = o.GodownId
               WHERE o.ProductId = @productId AND o.Status = 'Available' AND o.LengthMm >= @lengthMm AND o.WidthMm >= @widthMm
@@ -567,12 +569,16 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         using var tx = conn.BeginTransaction();
         try
         {
+            var stockUnit = conn.ExecuteScalar<string?>("SELECT StockUnit FROM Master.Product WHERE ProductId = @ProductId", new { req.ProductId }, tx);
+            decimal areaSqft = Math.Round(req.LengthMm * req.WidthMm / 92903.04m, 3);
+            decimal areaInStockUnit = StockUnitConversion.ToStockUnit(areaSqft, "SQFT", stockUnit);
+
             int branchId = DocNumbering.DefaultBranchId(conn, tx);
             string code = DocNumbering.NextNumber(conn, tx, branchId, "Offcut");
             var id = conn.ExecuteScalar<int>(
-                @"INSERT INTO Inventory.Offcut (OffcutCode, ProductId, LengthMm, WidthMm, GodownId, Status)
-                  OUTPUT INSERTED.OffcutId VALUES (@code, @ProductId, @LengthMm, @WidthMm, @GodownId, 'Available')",
-                new { code, req.ProductId, req.LengthMm, req.WidthMm, req.GodownId }, tx);
+                @"INSERT INTO Inventory.Offcut (OffcutCode, ProductId, LengthMm, WidthMm, GodownId, Status, AreaInStockUnit, StockUnit)
+                  OUTPUT INSERTED.OffcutId VALUES (@code, @ProductId, @LengthMm, @WidthMm, @GodownId, 'Available', @areaInStockUnit, @stockUnit)",
+                new { code, req.ProductId, req.LengthMm, req.WidthMm, req.GodownId, areaInStockUnit, stockUnit }, tx);
             tx.Commit();
             return Created($"/api/v1/offcuts/{id}", new { offcutId = id, offcutCode = code });
         }

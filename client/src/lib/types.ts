@@ -30,6 +30,11 @@ export interface ProductDto {
   gstRatePct: number
   stockUnit: string
   sellingUnit: string
+  /** The size a full sheet of this product is normally stocked in — optional; when set, drives the
+   * "≈ N sheets" report readout and lets a sale that cuts a fresh sheet automatically log the
+   * remainder as a reusable offcut. */
+  standardSheetLengthMm?: number | null
+  standardSheetWidthMm?: number | null
   purchaseRate?: number | null
   sellingRate?: number | null
   minSellingPrice?: number | null
@@ -266,9 +271,28 @@ export interface CreateStockTransferRequest { fromGodownId: number; toGodownId: 
 
 export interface OffcutDto {
   offcutId: number; offcutCode?: string | null; productId: number; productCode?: string | null
-  lengthMm: number; widthMm: number; areaSqft: number; godownId: number; godownName?: string | null; status: string; createdOn: string
+  lengthMm: number; widthMm: number; areaSqft: number
+  /** Same area as areaSqft, converted into the product's own StockUnit. */
+  areaInStockUnit?: number | null; stockUnit?: string | null
+  /** Which sale produced this leftover, if it was auto-logged rather than manually entered. */
+  sourceDocType?: string | null; sourceDocId?: number | null
+  /** Which sale consumed this offcut, once used. */
+  consumedByDocType?: string | null; consumedByDocId?: number | null
+  godownId: number; godownName?: string | null; status: string; createdOn: string
 }
 export interface CreateOffcutRequest { productId: number; lengthMm: number; widthMm: number; godownId: number }
+
+/** Full-sheet stock and leftover offcut stock, side by side, per product/godown — see
+ * ReportsController.InventoryStatus. */
+export interface InventoryStatusRow {
+  productId: number; productCode?: string | null; productDescription?: string | null
+  godownId: number; godownName?: string | null; stockUnit: string
+  qtyOnHand: number; qtyFree: number
+  /** qtyFree ÷ one standard sheet's area — only set when the product has a standard sheet size
+   * configured. */
+  sheetEquivalent?: number | null
+  offcutCount: number; offcutAreaInStockUnit: number
+}
 
 // ---------- Purchase ----------
 export interface SupplierDto {

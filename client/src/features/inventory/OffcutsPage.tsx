@@ -145,19 +145,21 @@ export default function OffcutsPage() {
                 <SortableTh onClick={() => toggleSort('areaSqft')} align="right">
                   Area (sqft) <SortIcon column="areaSqft" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
+                <Th align="right">Area (product unit)</Th>
                 <SortableTh onClick={() => toggleSort('godownName')}>
                   Godown <SortIcon column="godownName" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
                 <SortableTh onClick={() => toggleSort('status')}>
                   Status <SortIcon column="status" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
+                <Th>Source / Used By</Th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={8} className="px-5 py-14 text-center text-slate-400">
                     <Puzzle size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No offcuts match your search.' : 'No offcuts logged yet.'}
                   </td>
@@ -169,8 +171,14 @@ export default function OffcutsPage() {
                   <td className="px-5 py-3 text-slate-700">{o.productCode}</td>
                   <td className="px-5 py-3 text-slate-500">{o.lengthMm} × {o.widthMm}</td>
                   <td className="px-5 py-3 text-right text-slate-700">{o.areaSqft}</td>
+                  <td className="px-5 py-3 text-right text-slate-500">{o.areaInStockUnit != null ? `${o.areaInStockUnit} ${o.stockUnit ?? ''}` : '—'}</td>
                   <td className="px-5 py-3 text-slate-500">{o.godownName}</td>
                   <td className="px-5 py-3"><span className={`inline-flex text-xs font-medium px-2.5 py-1 rounded-full ring-1 ${statusStyles[o.status] ?? statusStyles.Available}`}>{o.status}</span></td>
+                  <td className="px-5 py-3 text-xs text-slate-500">
+                    {o.sourceDocType ? <div>From {o.sourceDocType} #{o.sourceDocId}</div> : null}
+                    {o.consumedByDocType ? <div>Used by {o.consumedByDocType} #{o.consumedByDocId}</div> : null}
+                    {!o.sourceDocType && !o.consumedByDocType ? '—' : null}
+                  </td>
                 </tr>
               ))}
             </tbody>

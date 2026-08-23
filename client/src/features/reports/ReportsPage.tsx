@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { BarChart3, Printer, Wallet2, Warehouse, LayoutGrid } from 'lucide-react'
+import { BarChart3, Printer, Wallet2, Warehouse, LayoutGrid, Layers } from 'lucide-react'
 import {
-  useStockSummaryQuery, useStockGodownSummaryQuery, useStockRackDetailQuery,
+  useStockSummaryQuery, useStockGodownSummaryQuery, useStockRackDetailQuery, useInventoryStatusQuery,
   useSalesRegisterQuery, useReceivablesAgeingQuery, useCustomerTransactionsQuery,
 } from './reportsApi'
 import { useListCustomersQuery } from '../masters/mastersApi'
@@ -16,18 +16,19 @@ import {
   DATA_GRID_ROW_CLASS,
   printReport,
 } from '../../components/DataGrid'
-import type { StockSummaryReportRow, SalesRegisterRow, CustomerTransactionRow, GodownStockSummaryRow, RackStockDetailRow } from '../../lib/types'
+import type { StockSummaryReportRow, SalesRegisterRow, CustomerTransactionRow, GodownStockSummaryRow, RackStockDetailRow, InventoryStatusRow } from '../../lib/types'
 
 function money(n: number) { return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n) }
 function qty(n: number) { return n.toLocaleString('en-IN', { maximumFractionDigits: 3 }) }
 
-const tabs = ['Stock Summary', 'Godown Stock Summary', 'Godown/Rack Stock Detail', 'Sales Register', 'Receivables Ageing', 'Customer Transactions'] as const
+const tabs = ['Stock Summary', 'Godown Stock Summary', 'Godown/Rack Stock Detail', 'Inventory Status', 'Sales Register', 'Receivables Ageing', 'Customer Transactions'] as const
 type Tab = (typeof tabs)[number]
 
 interface AgeingRow { customerName: string; invoiceNo: string; invoiceDate: string; totalValue: number; ageDays: number }
 
 type StockSortKey = 'productCode' | 'qtyOnHand' | 'qtyFree' | 'avgRate' | 'stockValue'
 type GodownSortKey = 'godownName' | 'productCode' | 'qtyOnHand' | 'qtyFree'
+type InventoryStatusSortKey = 'productCode' | 'godownName' | 'qtyOnHand' | 'qtyFree' | 'sheetEquivalent' | 'offcutCount' | 'offcutAreaInStockUnit'
 type RackSortKey = 'godownName' | 'rackCode' | 'productCode' | 'rackQty' | 'godownBookQty' | 'variance'
 type SalesSortKey = 'invoiceNo' | 'invoiceDate' | 'customerName' | 'taxableValue' | 'taxValue' | 'totalValue'
 type AgeingSortKey = 'customerName' | 'invoiceNo' | 'invoiceDate' | 'totalValue' | 'ageDays'
@@ -38,6 +39,7 @@ export default function ReportsPage() {
   const { data: stock, isLoading: loadingStock } = useStockSummaryQuery(undefined, { skip: tab !== 'Stock Summary' })
   const { data: godownSummary, isLoading: loadingGodownSummary } = useStockGodownSummaryQuery(undefined, { skip: tab !== 'Godown Stock Summary' })
   const { data: rackDetail, isLoading: loadingRackDetail } = useStockRackDetailQuery(undefined, { skip: tab !== 'Godown/Rack Stock Detail' })
+  const { data: inventoryStatus, isLoading: loadingInventoryStatus } = useInventoryStatusQuery(undefined, { skip: tab !== 'Inventory Status' })
   const { data: sales, isLoading: loadingSales } = useSalesRegisterQuery(undefined, { skip: tab !== 'Sales Register' })
   const { data: ageing, isLoading: loadingAgeing } = useReceivablesAgeingQuery(undefined, { skip: tab !== 'Receivables Ageing' })
   const { data: customers } = useListCustomersQuery(undefined, { skip: tab !== 'Customer Transactions' })
@@ -87,6 +89,20 @@ export default function ReportsPage() {
       variance: (a, b) => (a.rackQty - a.godownBookQty) - (b.rackQty - b.godownBookQty),
     },
     matches: (r, term) => !!r.godownName?.toLowerCase().includes(term) || !!r.rackCode?.toLowerCase().includes(term) || !!r.productCode?.toLowerCase().includes(term),
+  })
+
+  const inventoryStatusGrid = useDataGrid<InventoryStatusRow, InventoryStatusSortKey>(inventoryStatus?.items, {
+    defaultSortKey: 'productCode',
+    comparators: {
+      productCode: (a, b) => (a.productCode ?? '').localeCompare(b.productCode ?? ''),
+      godownName: (a, b) => (a.godownName ?? '').localeCompare(b.godownName ?? ''),
+      qtyOnHand: (a, b) => a.qtyOnHand - b.qtyOnHand,
+      qtyFree: (a, b) => a.qtyFree - b.qtyFree,
+      sheetEquivalent: (a, b) => (a.sheetEquivalent ?? 0) - (b.sheetEquivalent ?? 0),
+      offcutCount: (a, b) => a.offcutCount - b.offcutCount,
+      offcutAreaInStockUnit: (a, b) => a.offcutAreaInStockUnit - b.offcutAreaInStockUnit,
+    },
+    matches: (r, term) => !!r.productCode?.toLowerCase().includes(term) || !!r.productDescription?.toLowerCase().includes(term) || !!r.godownName?.toLowerCase().includes(term),
   })
 
   const salesGrid = useDataGrid<SalesRegisterRow, SalesSortKey>(sales?.items, {
@@ -157,6 +173,25 @@ export default function ReportsPage() {
         `${r.productCode} — ${r.productDescription}`,
         `${qty(r.qtyOnHand)} ${r.unit ?? ''}`,
         `${qty(r.qtyFree)} ${r.unit ?? ''}`,
+      ]),
+    })
+  }
+
+  function printInventoryStatus() {
+    printReport({
+      title: 'Inventory Status',
+      columns: [
+        { label: 'Product' }, { label: 'Godown' }, { label: 'On Hand', align: 'right' }, { label: 'Free', align: 'right' },
+        { label: '≈ Sheets', align: 'right' }, { label: 'Offcuts', align: 'right' }, { label: 'Offcut Area', align: 'right' },
+      ],
+      rows: inventoryStatusGrid.allRows.map((r) => [
+        `${r.productCode} — ${r.productDescription}`,
+        r.godownName ?? '—',
+        `${qty(r.qtyOnHand)} ${r.stockUnit}`,
+        `${qty(r.qtyFree)} ${r.stockUnit}`,
+        r.sheetEquivalent != null ? qty(r.sheetEquivalent) : '—',
+        r.offcutCount ? String(r.offcutCount) : '—',
+        r.offcutCount ? `${qty(r.offcutAreaInStockUnit)} ${r.stockUnit}` : '—',
       ]),
     })
   }
@@ -444,6 +479,78 @@ export default function ReportsPage() {
             startIndex={rackGrid.startIndex}
             endIndex={rackGrid.endIndex}
             onPageChange={rackGrid.setPage}
+          />
+        </div>
+      )}
+
+      {tab === 'Inventory Status' && (
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          <DataGridSearchBar
+            value={inventoryStatusGrid.search}
+            onChange={inventoryStatusGrid.setSearch}
+            placeholder="Search product or godown…"
+            pageSize={inventoryStatusGrid.pageSize}
+            onPageSizeChange={inventoryStatusGrid.setPageSize}
+            rightSlot={<DataGridButton onClick={printInventoryStatus} title="Print this report"><Printer size={15} /> Print</DataGridButton>}
+          />
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className={DATA_GRID_HEAD_ROW_CLASS}>
+                  <SortableTh onClick={() => inventoryStatusGrid.toggleSort('productCode')}>
+                    Product <SortIcon column="productCode" sortKey={inventoryStatusGrid.sortKey} sortDir={inventoryStatusGrid.sortDir} />
+                  </SortableTh>
+                  <SortableTh onClick={() => inventoryStatusGrid.toggleSort('godownName')}>
+                    Godown <SortIcon column="godownName" sortKey={inventoryStatusGrid.sortKey} sortDir={inventoryStatusGrid.sortDir} />
+                  </SortableTh>
+                  <SortableTh onClick={() => inventoryStatusGrid.toggleSort('qtyOnHand')} align="right">
+                    On Hand <SortIcon column="qtyOnHand" sortKey={inventoryStatusGrid.sortKey} sortDir={inventoryStatusGrid.sortDir} />
+                  </SortableTh>
+                  <SortableTh onClick={() => inventoryStatusGrid.toggleSort('qtyFree')} align="right">
+                    Free <SortIcon column="qtyFree" sortKey={inventoryStatusGrid.sortKey} sortDir={inventoryStatusGrid.sortDir} />
+                  </SortableTh>
+                  <SortableTh onClick={() => inventoryStatusGrid.toggleSort('sheetEquivalent')} align="right">
+                    ≈ Sheets <SortIcon column="sheetEquivalent" sortKey={inventoryStatusGrid.sortKey} sortDir={inventoryStatusGrid.sortDir} />
+                  </SortableTh>
+                  <SortableTh onClick={() => inventoryStatusGrid.toggleSort('offcutCount')} align="right">
+                    Offcuts <SortIcon column="offcutCount" sortKey={inventoryStatusGrid.sortKey} sortDir={inventoryStatusGrid.sortDir} />
+                  </SortableTh>
+                  <SortableTh onClick={() => inventoryStatusGrid.toggleSort('offcutAreaInStockUnit')} align="right">
+                    Offcut Area <SortIcon column="offcutAreaInStockUnit" sortKey={inventoryStatusGrid.sortKey} sortDir={inventoryStatusGrid.sortDir} />
+                  </SortableTh>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loadingInventoryStatus && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+                {!loadingInventoryStatus && inventoryStatusGrid.rows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="px-5 py-14 text-center text-slate-400">
+                      <Layers size={28} className="mx-auto mb-2 text-slate-300" />
+                      {inventoryStatusGrid.search ? 'No stock matches your search.' : 'No stock records.'}
+                    </td>
+                  </tr>
+                )}
+                {inventoryStatusGrid.rows.map((r, i) => (
+                  <tr key={`${r.godownId}-${r.productCode}-${i}`} className={DATA_GRID_ROW_CLASS}>
+                    <td className="px-5 py-3"><div className="font-medium text-slate-800">{r.productCode}</div><div className="text-xs text-slate-400">{r.productDescription}</div></td>
+                    <td className="px-5 py-3 text-slate-700">{r.godownName}</td>
+                    <td className="px-5 py-3 text-right text-slate-700">{qty(r.qtyOnHand)} {r.stockUnit}</td>
+                    <td className="px-5 py-3 text-right text-emerald-700 font-medium">{qty(r.qtyFree)} {r.stockUnit}</td>
+                    <td className="px-5 py-3 text-right text-slate-500">{r.sheetEquivalent != null ? qty(r.sheetEquivalent) : '—'}</td>
+                    <td className="px-5 py-3 text-right text-slate-500">{r.offcutCount || '—'}</td>
+                    <td className="px-5 py-3 text-right text-slate-500">{r.offcutCount ? `${qty(r.offcutAreaInStockUnit)} ${r.stockUnit}` : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <DataGridPagination
+            page={inventoryStatusGrid.page}
+            pageCount={inventoryStatusGrid.pageCount}
+            totalCount={inventoryStatusGrid.totalCount}
+            startIndex={inventoryStatusGrid.startIndex}
+            endIndex={inventoryStatusGrid.endIndex}
+            onPageChange={inventoryStatusGrid.setPage}
           />
         </div>
       )}
