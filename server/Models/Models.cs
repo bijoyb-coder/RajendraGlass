@@ -175,6 +175,7 @@ public class CustomerDto
     public int CreditPeriodDays { get; set; }
     public bool CreditBlocked { get; set; }
     public bool IsActive { get; set; }
+    public bool CanDelete { get; set; } = true;
 }
 
 public class TransporterDto

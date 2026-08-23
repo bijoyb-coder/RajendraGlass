@@ -62,6 +62,7 @@ export interface CustomerDto {
   creditPeriodDays: number
   creditBlocked: boolean
   isActive: boolean
+  canDelete: boolean
 }
 
 export interface TransporterDto {
