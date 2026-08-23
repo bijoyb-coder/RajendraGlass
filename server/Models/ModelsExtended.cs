@@ -212,6 +212,17 @@ public class OffcutDto
     public decimal LengthMm { get; set; }
     public decimal WidthMm { get; set; }
     public decimal AreaSqft { get; set; }
+    /// <summary>Same area as AreaSqft, converted into the product's own StockUnit — so full-sheet
+    /// stock and offcut stock read in one consistent unit per product.</summary>
+    public decimal? AreaInStockUnit { get; set; }
+    public string? StockUnit { get; set; }
+    /// <summary>Which sale produced this leftover, if it was auto-logged rather than manually
+    /// entered (e.g. 'CounterInvoice').</summary>
+    public string? SourceDocType { get; set; }
+    public int? SourceDocId { get; set; }
+    /// <summary>Which sale consumed this offcut, once used.</summary>
+    public string? ConsumedByDocType { get; set; }
+    public int? ConsumedByDocId { get; set; }
     public int GodownId { get; set; }
     public string? GodownName { get; set; }
     public string Status { get; set; } = "Available";

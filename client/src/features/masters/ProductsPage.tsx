@@ -123,6 +123,8 @@ export default function ProductsPage() {
           <Field label="GST %"><input type="number" step="0.01" value={form.gstRatePct ?? 18} onChange={(e) => set('gstRatePct', Number(e.target.value))} className={inputClass} /></Field>
           <Field label="Selling Rate"><input type="number" step="0.01" value={form.sellingRate ?? ''} onChange={(e) => set('sellingRate', Number(e.target.value))} className={inputClass} /></Field>
           <Field label="Min Selling Price"><input type="number" step="0.01" value={form.minSellingPrice ?? ''} onChange={(e) => set('minSellingPrice', Number(e.target.value))} className={inputClass} /></Field>
+          <Field label="Standard Sheet Length (mm)"><input type="number" step="0.01" value={form.standardSheetLengthMm ?? ''} onChange={(e) => set('standardSheetLengthMm', e.target.value ? Number(e.target.value) : undefined)} className={inputClass} placeholder="Optional" /></Field>
+          <Field label="Standard Sheet Width (mm)"><input type="number" step="0.01" value={form.standardSheetWidthMm ?? ''} onChange={(e) => set('standardSheetWidthMm', e.target.value ? Number(e.target.value) : undefined)} className={inputClass} placeholder="Optional" /></Field>
           {error && <div className="sm:col-span-3 text-sm text-red-600">{error}</div>}
           <div className="sm:col-span-3 flex justify-end">
             <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">

@@ -111,9 +111,27 @@ public class InvoicesController(IDbConnectionFactory db, IEInvoiceGateway eInvoi
 
             var lines = conn.Query("SELECT * FROM Sales.InvoiceLine WHERE InvoiceId = @id", new { id }, tx).ToList();
 
+            // Create now moves stock (see Create above) — reverse exactly what it took, reading it
+            // back from this invoice's own StockMovement rows (authoritative record of what
+            // actually happened). Reversing a sale only ever credits stock back, so — unlike
+            // reversing a Purchase Invoice/GRN, which can hit a floor if that stock has already
+            // moved on elsewhere — there's no "already consumed" case to guard against here.
+            // Invoices booked before this became stock-affecting simply have no matching movement
+            // rows, so this is a no-op for them.
+            var movements = conn.Query<(int ProductId, int GodownId, decimal Qty)>(
+                "SELECT ProductId, GodownId, Qty FROM Inventory.StockMovement WHERE DocType = 'Invoice' AND DocId = @id AND MovementType = 'Sale'",
+                new { id }, tx).ToList();
+            foreach (var m in movements)
+            {
+                conn.Execute(
+                    "UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @Qty WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { m.Qty, m.ProductId, m.GodownId }, tx);
+            }
+            conn.Execute("DELETE FROM Inventory.StockMovement WHERE DocType = 'Invoice' AND DocId = @id", new { id }, tx);
+
             conn.Execute("DELETE FROM Sales.InvoiceLine WHERE InvoiceId = @id", new { id }, tx);
             conn.Execute("DELETE FROM Sales.Invoice WHERE InvoiceId = @id", new { id }, tx);
-            AuditLogger.LogDelete(conn, tx, User, HttpContext, "Invoice", id.ToString(), new { Invoice = header, Lines = lines });
+            AuditLogger.LogDelete(conn, tx, User, HttpContext, "Invoice", id.ToString(), new { Invoice = header, Lines = lines, ReversedStockMovements = movements });
             tx.Commit();
             return NoContent();
         }
@@ -187,10 +205,20 @@ public class InvoicesController(IDbConnectionFactory db, IEInvoiceGateway eInvoi
             decimal basic = 0, discount = 0;
             var lineRows = new List<(int ProductId, decimal? NoOfSheets, decimal Qty, decimal Rate, decimal Disc, decimal Net, decimal Gst)>();
             int lineNo = 1;
+            // A regular Sales Invoice line is a plain quantity (no Length/Width — by the time a
+            // Sales Order becomes an Invoice the dimension math already happened upstream), so
+            // stock moves by Quantity converted from the product's SellingUnit into its StockUnit
+            // (StockUnitConversion.ToStockUnit) — no offcut logic here, since there's no piece
+            // geometry to compute a leftover shape from (see OffcutAllocation's doc comment, which
+            // is what Counter Billing uses instead for exactly that reason).
+            var godownId = conn.QueryFirstOrDefault<int?>(
+                "SELECT TOP 1 GodownId FROM Company.Godown WHERE Code = 'MAIN' AND IsActive = 1", transaction: tx) ?? 1;
+            var stockDeductions = new List<(int ProductId, decimal RequiredStockQty)>();
+
             foreach (var line in req.Lines)
             {
                 var product = conn.QueryFirstOrDefault(
-                    "SELECT Description, GstRatePct, MinSellingPrice FROM Master.Product WHERE ProductId = @ProductId AND IsActive = 1",
+                    "SELECT Description, GstRatePct, MinSellingPrice, StockUnit, SellingUnit FROM Master.Product WHERE ProductId = @ProductId AND IsActive = 1",
                     new { line.ProductId }, transaction: tx);
                 if (product is null)
                 {
@@ -203,6 +231,25 @@ public class InvoicesController(IDbConnectionFactory db, IEInvoiceGateway eInvoi
                     tx.Rollback();
                     return UnprocessableEntity(new ProblemResponse { Title = "Price below minimum", Status = 422, ErrorCode = "PRICE_BELOW_MIN", Detail = $"Rate {line.RatePerUnit} is below the minimum selling price {minPrice} for this product." });
                 }
+
+                decimal requiredStockQty = StockUnitConversion.ToStockUnit(line.Quantity, (string)product.SellingUnit, (string)product.StockUnit);
+                var balance = conn.QueryFirstOrDefault(
+                    "SELECT (QtyOnHand - QtyReserved - QtyBlocked - QtyDamaged) AS QtyFree FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @godownId",
+                    new { line.ProductId, godownId }, tx);
+                decimal qtyFree = balance?.QtyFree ?? 0m;
+                if (qtyFree < requiredStockQty)
+                {
+                    tx.Rollback();
+                    return Conflict(new ProblemResponse
+                    {
+                        Title = "Stock conflict",
+                        Status = 409,
+                        ErrorCode = "STOCK_INSUFFICIENT",
+                        Detail = $"Only {qtyFree} {product.StockUnit} of this product is available; {requiredStockQty} {product.StockUnit} was billed."
+                    });
+                }
+                stockDeductions.Add((line.ProductId, requiredStockQty));
+
                 decimal lineBasic = Math.Round(line.Quantity * line.RatePerUnit, 2);
                 decimal lineNet = lineBasic - line.DiscountValue;
                 basic += lineBasic;
@@ -283,6 +330,16 @@ public class InvoicesController(IDbConnectionFactory db, IEInvoiceGateway eInvoi
                       VALUES (@invoiceId, @ln, @ProductId, @NoOfSheets, @Qty, @Rate, @LineBasic, @Disc, @Net, @Gst)",
                     new { invoiceId, ln, l.ProductId, l.NoOfSheets, l.Qty, l.Rate, LineBasic = Math.Round(l.Qty * l.Rate, 2), l.Disc, l.Net, l.Gst }, tx);
                 ln++;
+            }
+
+            foreach (var (productId, requiredStockQty) in stockDeductions)
+            {
+                conn.Execute(
+                    "UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @requiredStockQty WHERE ProductId = @productId AND GodownId = @godownId",
+                    new { requiredStockQty, productId, godownId }, tx);
+                conn.Execute(
+                    "INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty) VALUES (@productId, @godownId, 'Sale', 'Invoice', @invoiceId, @negQty)",
+                    new { productId, godownId, invoiceId, negQty = -requiredStockQty }, tx);
             }
 
             conn.Execute(@"INSERT INTO Security.AuditLog (Action, Entity, EntityId, AfterJson) VALUES ('Create', 'Invoice', @EntityId, @AfterJson)",

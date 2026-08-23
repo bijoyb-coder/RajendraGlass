@@ -1,5 +1,5 @@
 import { api } from '../../app/api'
-import type { StockSummaryReportRow, SalesRegisterRow, CustomerTransactionReport, GodownStockSummaryRow, RackStockDetailRow } from '../../lib/types'
+import type { StockSummaryReportRow, SalesRegisterRow, CustomerTransactionReport, GodownStockSummaryRow, RackStockDetailRow, InventoryStatusRow } from '../../lib/types'
 
 export const reportsApi = api.injectEndpoints({
   endpoints: (builder) => ({
@@ -11,6 +11,9 @@ export const reportsApi = api.injectEndpoints({
     }),
     stockRackDetail: builder.query<{ items: RackStockDetailRow[] }, void>({
       query: () => '/reports/stock-rack-detail',
+    }),
+    inventoryStatus: builder.query<{ items: InventoryStatusRow[] }, void>({
+      query: () => '/reports/inventory-status',
     }),
     salesRegister: builder.query<{ items: SalesRegisterRow[]; total: number }, void>({
       query: () => '/reports/sales-register',
@@ -28,6 +31,7 @@ export const {
   useStockSummaryQuery,
   useStockGodownSummaryQuery,
   useStockRackDetailQuery,
+  useInventoryStatusQuery,
   useSalesRegisterQuery,
   useReceivablesAgeingQuery,
   useCustomerTransactionsQuery,

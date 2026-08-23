@@ -291,13 +291,20 @@ public class CounterInvoicesController(IDbConnectionFactory db, INotificationPub
                         metadata,
                     }, tx);
 
-                conn.Execute(
-                    "UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @Qty WHERE ProductId = @ProductId AND GodownId = @godownId",
-                    new { Qty = p.RequiredQty, l.ProductId, godownId }, tx);
-                conn.Execute(
-                    @"INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty)
-                      VALUES (@ProductId, @godownId, 'Sale', 'CounterInvoice', @invoiceId, @negQty)",
-                    new { l.ProductId, godownId, invoiceId, negQty = -p.RequiredQty }, tx);
+                // A cut piece can come from an existing leftover before touching a full sheet — and
+                // if it does have to come from a full sheet, the fresh remainder gets logged as a
+                // new offcut for next time (see OffcutAllocation's doc comment for the full picture;
+                // PER_PIECE lines carry no meaningful Length/Width, so they always cut fresh).
+                decimal pieceLengthMm = calc.ChargeLengthInch * 25.4m;
+                decimal pieceWidthMm = calc.ChargeWidthInch * 25.4m;
+                bool isPiece = string.Equals(calc.RateUnit, RateUnits.PerPiece, StringComparison.OrdinalIgnoreCase);
+                bool reused = !isPiece && pieceLengthMm > 0 && pieceWidthMm > 0
+                    && OffcutAllocation.TryReuseOffcut(conn, tx, l.ProductId, godownId, pieceLengthMm, pieceWidthMm, "CounterInvoice", invoiceId);
+                if (!reused)
+                {
+                    OffcutAllocation.DeductStockAndLogOffcut(conn, tx, l.ProductId, godownId, p.RequiredQty,
+                        isPiece ? null : pieceLengthMm, isPiece ? null : pieceWidthMm, "CounterInvoice", invoiceId);
+                }
                 ln++;
             }
 

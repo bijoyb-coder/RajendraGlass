@@ -60,6 +60,66 @@ public class ReportsController(IDbConnectionFactory db) : ControllerBase
         return Ok(new { items = rows });
     }
 
+    /// <summary>Full-sheet stock and leftover offcut stock, side by side, per product/godown — the
+    /// single combined view for "how much of this glass do we actually have left, and in what
+    /// shape". QtyOnHand/QtyFree/OffcutAreaInStockUnit are already in the product's own StockUnit;
+    /// SheetEquivalent (QtyFree divided by one standard sheet's area) is only populated for
+    /// products that have a standard sheet size configured (Master.Product.StandardSheetLengthMm/
+    /// WidthMm) — otherwise it's just the plain area figure, same as today.</summary>
+    [HttpGet("inventory-status")]
+    public IActionResult InventoryStatus()
+    {
+        using var conn = db.CreateConnection();
+        var stockRows = conn.Query(
+            @"SELECT p.ProductId, p.Code AS ProductCode, p.Description AS ProductDescription, p.StockUnit,
+                     p.StandardSheetLengthMm, p.StandardSheetWidthMm,
+                     sb.GodownId, g.Name AS GodownName, sb.QtyOnHand,
+                     (sb.QtyOnHand - sb.QtyReserved - sb.QtyBlocked - sb.QtyDamaged) AS QtyFree
+              FROM Inventory.StockBalance sb
+              JOIN Master.Product p ON p.ProductId = sb.ProductId
+              JOIN Company.Godown g ON g.GodownId = sb.GodownId
+              WHERE sb.QtyOnHand <> 0
+              ORDER BY p.Description, g.Name").ToList();
+
+        var offcutTotals = conn.Query(
+            @"SELECT o.ProductId, o.GodownId, COUNT(*) AS OffcutCount, SUM(ISNULL(o.AreaInStockUnit, 0)) AS OffcutArea
+              FROM Inventory.Offcut o WHERE o.Status = 'Available'
+              GROUP BY o.ProductId, o.GodownId")
+            .ToDictionary(r => ((int)r.ProductId, (int)r.GodownId), r => ((int)r.OffcutCount, (decimal)r.OffcutArea));
+
+        var rows = stockRows.Select(r =>
+        {
+            decimal? sheetLength = r.StandardSheetLengthMm;
+            decimal? sheetWidth = r.StandardSheetWidthMm;
+            decimal? sheetAreaInStockUnit = null;
+            decimal? sheetEquivalent = null;
+            if (sheetLength is > 0 && sheetWidth is > 0)
+            {
+                decimal sheetAreaSqft = Math.Round(sheetLength.Value * sheetWidth.Value / 92903.04m, 3);
+                sheetAreaInStockUnit = StockUnitConversion.ToStockUnit(sheetAreaSqft, "SQFT", (string)r.StockUnit);
+                if (sheetAreaInStockUnit is > 0) sheetEquivalent = Math.Round((decimal)r.QtyFree / sheetAreaInStockUnit.Value, 2);
+            }
+            offcutTotals.TryGetValue(((int)r.ProductId, (int)r.GodownId), out var offcut);
+
+            return new InventoryStatusRow
+            {
+                ProductId = r.ProductId,
+                ProductCode = r.ProductCode,
+                ProductDescription = r.ProductDescription,
+                GodownId = r.GodownId,
+                GodownName = r.GodownName,
+                StockUnit = r.StockUnit,
+                QtyOnHand = r.QtyOnHand,
+                QtyFree = r.QtyFree,
+                SheetEquivalent = sheetEquivalent,
+                OffcutCount = offcut.Item1,
+                OffcutAreaInStockUnit = offcut.Item2,
+            };
+        }).ToList();
+
+        return Ok(new { items = rows });
+    }
+
     [HttpGet("sales-register")]
     public IActionResult SalesRegister([FromQuery] DateTime? from, [FromQuery] DateTime? to)
     {
@@ -128,6 +188,23 @@ public class ReportsController(IDbConnectionFactory db) : ControllerBase
             balance = running,
         });
     }
+}
+
+public class InventoryStatusRow
+{
+    public int ProductId { get; set; }
+    public string? ProductCode { get; set; }
+    public string? ProductDescription { get; set; }
+    public int GodownId { get; set; }
+    public string? GodownName { get; set; }
+    public string StockUnit { get; set; } = "";
+    public decimal QtyOnHand { get; set; }
+    public decimal QtyFree { get; set; }
+    /// <summary>QtyFree ÷ one standard sheet's area — only set when the product has a standard
+    /// sheet size configured.</summary>
+    public decimal? SheetEquivalent { get; set; }
+    public int OffcutCount { get; set; }
+    public decimal OffcutAreaInStockUnit { get; set; }
 }
 
 public class CustomerTransactionRow
