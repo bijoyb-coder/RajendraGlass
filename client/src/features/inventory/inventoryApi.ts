@@ -51,6 +51,10 @@ export const inventoryApi = api.injectEndpoints({
       query: (body) => ({ url: '/rack-stock/transfer', method: 'POST', body }),
       invalidatesTags: ['RackStock', 'Stock'],
     }),
+    deleteRackStock: builder.mutation<void, number>({
+      query: (id) => ({ url: `/rack-stock/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['RackStock', 'Product'],
+    }),
 
     stockEnquiry: builder.query<{ items: StockBalanceDto[]; total: number }, { godownId?: number; search?: string } | void>({
       query: (args) => ({ url: '/stock', params: args ?? {} }),
@@ -102,6 +106,7 @@ export const {
   useListRackStockQuery,
   useAdjustRackStockMutation,
   useTransferRackStockMutation,
+  useDeleteRackStockMutation,
   useStockEnquiryQuery,
   useListAdjustmentsQuery,
   useCreateAdjustmentMutation,

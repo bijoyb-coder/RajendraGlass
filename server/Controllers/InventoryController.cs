@@ -230,6 +230,33 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         return Ok(new { items = rows });
     }
 
+    /// <summary>Always allowed -- RackStock is a second, independent ledger from the godown-level
+    /// StockBalance (reconciled by comparison, never a shared row) and nothing downstream ever
+    /// references a RackStockId, so removing a row never touches StockBalance/StockMovement; it
+    /// simply means this rack no longer carries a tracked quantity for that product.</summary>
+    [RequirePermission("RackStock.Delete")]
+    [HttpDelete("rack-stock/{id:int}")]
+    public IActionResult DeleteRackStock(int id)
+    {
+        using var conn = db.CreateConnection();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var row = conn.QueryFirstOrDefault("SELECT * FROM Inventory.RackStock WHERE RackStockId = @id", new { id }, tx);
+            if (row is null) { tx.Rollback(); return NotFound(); }
+
+            conn.Execute("DELETE FROM Inventory.RackStock WHERE RackStockId = @id", new { id }, tx);
+            AuditLogger.LogDelete(conn, tx, User, HttpContext, "RackStock", id.ToString(), row);
+            tx.Commit();
+            return NoContent();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
     /// <summary>Records what was physically counted at a rack — the rack-level equivalent of a
     /// Stock Adjustment. Never touches the godown-level StockBalance: that book figure is exactly
     /// what a rack count is meant to be compared against, not overwritten by.</summary>
