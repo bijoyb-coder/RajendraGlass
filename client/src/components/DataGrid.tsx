@@ -158,18 +158,27 @@ export function ActionTh({ align = "right" }: { align?: "left" | "right" }) {
  * whatever else follows the same rule). Hidden outright when `canDelete` is false rather than
  * shown-disabled — a document that can never be deleted this way (e.g. already converted) has no
  * business showing a delete affordance at all.
+ *
+ * Pass `alwaysShow` to keep the button visible even when `canDelete` is false — the click still
+ * confirms and attempts the delete, and a blocked delete surfaces the backend's specific reason
+ * (`err?.data?.detail`) via the same SweetAlert error below, rather than hiding the affordance.
+ * Use this where the reason itself is useful information (e.g. Products, where "why can't I
+ * delete this" is a real question), not as the default for every list.
  */
 export function DeleteRowAction({
   canDelete,
   itemLabel,
   onDelete,
+  alwaysShow = false,
 }: {
   canDelete: boolean;
   /** Names the row in the confirm dialog, e.g. "quotation RGC/QTN/26-27/00001". */
   itemLabel: string;
   onDelete: () => Promise<unknown>;
+  /** Show the Delete button even when canDelete is false; a blocked attempt reports why via SweetAlert. */
+  alwaysShow?: boolean;
 }) {
-  if (!canDelete) return null;
+  if (!canDelete && !alwaysShow) return null;
   async function handleClick() {
     const confirmed = await confirmAction(
       "Delete this record?",

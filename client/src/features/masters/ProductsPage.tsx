@@ -228,6 +228,7 @@ export default function ProductsPage() {
                       </button>
                       <DeleteRowAction
                         canDelete={p.canDelete}
+                        alwaysShow
                         itemLabel={`Product ${p.description}`}
                         onDelete={() => deleteProduct(p.productId).unwrap()}
                       />
