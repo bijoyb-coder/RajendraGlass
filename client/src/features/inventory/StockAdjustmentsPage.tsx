@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus, X, Trash2, ClipboardEdit } from 'lucide-react'
-import { useListAdjustmentsQuery, useCreateAdjustmentMutation } from './inventoryApi'
+import { useListAdjustmentsQuery, useCreateAdjustmentMutation, useDeleteAdjustmentMutation } from './inventoryApi'
 import { useListGodownsQuery } from './inventoryApi'
 import { useListProductsQuery } from '../masters/mastersApi'
 import {
@@ -12,6 +12,8 @@ import {
   DataGridPagination,
   DATA_GRID_HEAD_ROW_CLASS,
   DATA_GRID_ROW_CLASS,
+  ActionTh,
+  DeleteRowAction,
 } from '../../components/DataGrid'
 import type { StockAdjustmentDto } from '../../lib/types'
 
@@ -26,6 +28,7 @@ export default function StockAdjustmentsPage() {
   const { data: godowns } = useListGodownsQuery()
   const { data: products } = useListProductsQuery()
   const [createAdjustment, { isLoading: saving }] = useCreateAdjustmentMutation()
+  const [deleteAdjustment] = useDeleteAdjustmentMutation()
 
   const [showForm, setShowForm] = useState(false)
   const [godownId, setGodownId] = useState<number | ''>('')
@@ -175,13 +178,14 @@ export default function StockAdjustmentsPage() {
                 <SortableTh onClick={() => toggleSort('status')}>
                   Status <SortIcon column="status" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
+                <ActionTh />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={6} className="px-5 py-14 text-center text-slate-400">
                     <ClipboardEdit size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No adjustments match your search.' : 'No adjustments yet.'}
                   </td>
@@ -194,6 +198,13 @@ export default function StockAdjustmentsPage() {
                   <td className="px-5 py-3 text-slate-700">{a.godownName}</td>
                   <td className="px-5 py-3 text-slate-500">{a.reason ?? '—'}</td>
                   <td className="px-5 py-3"><span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">{a.status}</span></td>
+                  <td className="px-5 py-3 text-right">
+                    <DeleteRowAction
+                      canDelete={a.canDelete}
+                      itemLabel={`Stock Adjustment ${a.adjustmentNo}`}
+                      onDelete={() => deleteAdjustment(a.stockAdjustmentId).unwrap()}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

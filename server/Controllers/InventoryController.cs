@@ -450,6 +450,67 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         }
     }
 
+    /// <summary>Nothing downstream ever references a Stock Adjustment, so it's always offered for
+    /// delete -- but it already moved real stock in, so deleting it must reverse exactly what it
+    /// moved (read back from its own Inventory.StockMovement rows, not recomputed) and is refused
+    /// if any of that stock has since moved on elsewhere, the same "stock already moved on" rule
+    /// GrnController.Delete already enforces for the same reason.</summary>
+    [RequirePermission("StockAdjustment.Delete")]
+    [HttpDelete("stock-adjustments/{id:int}")]
+    public IActionResult DeleteAdjustment(int id)
+    {
+        using var conn = db.CreateConnection();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var header = conn.QueryFirstOrDefault("SELECT * FROM Inventory.StockAdjustment WHERE StockAdjustmentId = @id", new { id }, tx);
+            if (header is null) { tx.Rollback(); return NotFound(); }
+
+            var lines = conn.Query("SELECT * FROM Inventory.StockAdjustmentLine WHERE StockAdjustmentId = @id", new { id }, tx).ToList();
+
+            var movements = conn.Query<(int ProductId, int GodownId, decimal Qty)>(
+                "SELECT ProductId, GodownId, Qty FROM Inventory.StockMovement WHERE DocType = 'StockAdjustment' AND DocId = @id AND MovementType = 'Adjustment'",
+                new { id }, tx).ToList();
+
+            foreach (var m in movements)
+            {
+                var current = conn.ExecuteScalar<decimal?>(
+                    "SELECT QtyOnHand FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { m.ProductId, m.GodownId }, tx) ?? 0m;
+                if (current - m.Qty < 0)
+                {
+                    tx.Rollback();
+                    var product = conn.QueryFirstOrDefault<string>("SELECT Code FROM Master.Product WHERE ProductId = @ProductId", new { m.ProductId }, tx);
+                    return Conflict(new ProblemResponse
+                    {
+                        Title = "Stock already moved",
+                        Status = 409,
+                        ErrorCode = "ADJUSTMENT_STOCK_MOVED",
+                        Detail = $"{product ?? $"Product {m.ProductId}"}: stock has moved on since this adjustment (only {current} now on hand); reversing it would take the balance negative. This adjustment cannot be deleted.",
+                    });
+                }
+            }
+
+            foreach (var m in movements)
+            {
+                conn.Execute(
+                    "UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @Qty WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { m.Qty, m.ProductId, m.GodownId }, tx);
+            }
+            conn.Execute("DELETE FROM Inventory.StockMovement WHERE DocType = 'StockAdjustment' AND DocId = @id", new { id }, tx);
+            conn.Execute("DELETE FROM Inventory.StockAdjustmentLine WHERE StockAdjustmentId = @id", new { id }, tx);
+            conn.Execute("DELETE FROM Inventory.StockAdjustment WHERE StockAdjustmentId = @id", new { id }, tx);
+            AuditLogger.LogDelete(conn, tx, User, HttpContext, "StockAdjustment", id.ToString(), new { Adjustment = header, Lines = lines, ReversedStockMovements = movements });
+            tx.Commit();
+            return NoContent();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
     // ---------------- Stock Transfer ----------------
     [HttpGet("stock-transfers")]
     public IActionResult ListTransfers()
@@ -539,7 +600,8 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         var rows = conn.Query<OffcutDto>(
             @"SELECT o.OffcutId, o.OffcutCode, o.ProductId, p.Code AS ProductCode, o.LengthMm, o.WidthMm, o.AreaSqft,
                      o.AreaInStockUnit, o.StockUnit, o.SourceDocType, o.SourceDocId, o.ConsumedByDocType, o.ConsumedByDocId,
-                     o.GodownId, g.Name AS GodownName, o.Status, o.CreatedOn
+                     o.GodownId, g.Name AS GodownName, o.Status, o.CreatedOn,
+                     CAST(CASE WHEN o.Status = 'Available' THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Inventory.Offcut o JOIN Master.Product p ON p.ProductId = o.ProductId JOIN Company.Godown g ON g.GodownId = o.GodownId
               WHERE (@productId IS NULL OR o.ProductId = @productId) AND (@status IS NULL OR o.Status = @status)
               ORDER BY o.CreatedOn DESC", new { productId, status });
@@ -554,7 +616,8 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         var rows = conn.Query<OffcutDto>(
             @"SELECT TOP 10 o.OffcutId, o.OffcutCode, o.ProductId, p.Code AS ProductCode, o.LengthMm, o.WidthMm, o.AreaSqft,
                      o.AreaInStockUnit, o.StockUnit, o.SourceDocType, o.SourceDocId, o.ConsumedByDocType, o.ConsumedByDocId,
-                     o.GodownId, g.Name AS GodownName, o.Status, o.CreatedOn
+                     o.GodownId, g.Name AS GodownName, o.Status, o.CreatedOn,
+                     CAST(CASE WHEN o.Status = 'Available' THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Inventory.Offcut o JOIN Master.Product p ON p.ProductId = o.ProductId JOIN Company.Godown g ON g.GodownId = o.GodownId
               WHERE o.ProductId = @productId AND o.Status = 'Available' AND o.LengthMm >= @lengthMm AND o.WidthMm >= @widthMm
               ORDER BY (o.LengthMm * o.WidthMm - @lengthMm * @widthMm) ASC, o.CreatedOn ASC", new { productId, lengthMm, widthMm });
@@ -595,5 +658,40 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         using var conn = db.CreateConnection();
         var rows = conn.Execute("UPDATE Inventory.Offcut SET Status = 'Used' WHERE OffcutId = @id AND Status = 'Available'", new { id });
         return rows == 0 ? NotFound() : NoContent();
+    }
+
+    /// <summary>Deletable only while still 'Available' -- a 'Used' offcut is tied to the real sale
+    /// that consumed it (ConsumedByDocType/ConsumedByDocId) and that history shouldn't be silently
+    /// erased. An offcut's area was never counted separately in Inventory.StockBalance (it was
+    /// already deducted from the parent sheet when the offcut was logged — see
+    /// OffcutAllocation.DeductStockAndLogOffcut), so removing an available one needs no stock
+    /// reversal; it simply discards that leftover piece from the reuse ledger.</summary>
+    [RequirePermission("Offcut.Delete")]
+    [HttpDelete("offcuts/{id:int}")]
+    public IActionResult DeleteOffcut(int id)
+    {
+        using var conn = db.CreateConnection();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var offcut = conn.QueryFirstOrDefault("SELECT * FROM Inventory.Offcut WHERE OffcutId = @id", new { id }, tx);
+            if (offcut is null) { tx.Rollback(); return NotFound(); }
+
+            if ((string)offcut.Status != "Available")
+            {
+                tx.Rollback();
+                return Conflict(new ProblemResponse { Title = "Offcut already used", Status = 409, ErrorCode = "OFFCUT_ALREADY_USED", Detail = "This offcut has already been consumed by a sale; it cannot be deleted." });
+            }
+
+            conn.Execute("DELETE FROM Inventory.Offcut WHERE OffcutId = @id", new { id }, tx);
+            AuditLogger.LogDelete(conn, tx, User, HttpContext, "Offcut", id.ToString(), offcut);
+            tx.Commit();
+            return NoContent();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
     }
 }
