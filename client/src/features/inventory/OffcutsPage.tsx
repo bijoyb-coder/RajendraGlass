@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Plus, X, Puzzle } from 'lucide-react'
-import { useListOffcutsQuery, useCreateOffcutMutation, useListGodownsQuery } from './inventoryApi'
+import { useListOffcutsQuery, useCreateOffcutMutation, useDeleteOffcutMutation, useListGodownsQuery } from './inventoryApi'
 import { useListProductsQuery } from '../masters/mastersApi'
 import {
   useDataGrid,
@@ -11,6 +11,8 @@ import {
   DataGridPagination,
   DATA_GRID_HEAD_ROW_CLASS,
   DATA_GRID_ROW_CLASS,
+  ActionTh,
+  DeleteRowAction,
 } from '../../components/DataGrid'
 import type { OffcutDto } from '../../lib/types'
 
@@ -29,6 +31,7 @@ export default function OffcutsPage() {
   const { data: godowns } = useListGodownsQuery()
   const { data: products } = useListProductsQuery()
   const [createOffcut, { isLoading: saving }] = useCreateOffcutMutation()
+  const [deleteOffcut] = useDeleteOffcutMutation()
 
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ productId: 0, lengthMm: 0, widthMm: 0, godownId: 0 })
@@ -153,13 +156,14 @@ export default function OffcutsPage() {
                   Status <SortIcon column="status" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
                 <Th>Source / Used By</Th>
+                <ActionTh />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={9} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={9} className="px-5 py-14 text-center text-slate-400">
                     <Puzzle size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No offcuts match your search.' : 'No offcuts logged yet.'}
                   </td>
@@ -178,6 +182,13 @@ export default function OffcutsPage() {
                     {o.sourceDocType ? <div>From {o.sourceDocType} #{o.sourceDocId}</div> : null}
                     {o.consumedByDocType ? <div>Used by {o.consumedByDocType} #{o.consumedByDocId}</div> : null}
                     {!o.sourceDocType && !o.consumedByDocType ? '—' : null}
+                  </td>
+                  <td className="px-5 py-3 text-right">
+                    <DeleteRowAction
+                      canDelete={o.canDelete}
+                      itemLabel={`Offcut ${o.offcutCode}`}
+                      onDelete={() => deleteOffcut(o.offcutId).unwrap()}
+                    />
                   </td>
                 </tr>
               ))}

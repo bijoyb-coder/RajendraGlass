@@ -64,6 +64,10 @@ export const inventoryApi = api.injectEndpoints({
       query: (body) => ({ url: '/stock-adjustments', method: 'POST', body }),
       invalidatesTags: ['StockAdjustment', 'Stock'],
     }),
+    deleteAdjustment: builder.mutation<void, number>({
+      query: (id) => ({ url: `/stock-adjustments/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['StockAdjustment', 'Stock'],
+    }),
     listTransfers: builder.query<{ items: StockTransferDto[] }, void>({
       query: () => '/stock-transfers',
       providesTags: ['StockTransfer'],
@@ -78,6 +82,10 @@ export const inventoryApi = api.injectEndpoints({
     }),
     createOffcut: builder.mutation<{ offcutId: number }, CreateOffcutRequest>({
       query: (body) => ({ url: '/offcuts', method: 'POST', body }),
+      invalidatesTags: ['Offcut'],
+    }),
+    deleteOffcut: builder.mutation<void, number>({
+      query: (id) => ({ url: `/offcuts/${id}`, method: 'DELETE' }),
       invalidatesTags: ['Offcut'],
     }),
   }),
@@ -97,8 +105,10 @@ export const {
   useStockEnquiryQuery,
   useListAdjustmentsQuery,
   useCreateAdjustmentMutation,
+  useDeleteAdjustmentMutation,
   useListTransfersQuery,
   useCreateTransferMutation,
   useListOffcutsQuery,
   useCreateOffcutMutation,
+  useDeleteOffcutMutation,
 } = inventoryApi

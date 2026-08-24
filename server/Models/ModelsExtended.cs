@@ -161,6 +161,7 @@ public class StockAdjustmentDto
     public string Status { get; set; } = "Draft";
     public string? Reason { get; set; }
     public List<StockAdjustmentLineDto> Lines { get; set; } = new();
+    public bool CanDelete { get; set; } = true;
 }
 
 public class CreateStockAdjustmentLineRequest
@@ -227,6 +228,7 @@ public class OffcutDto
     public string? GodownName { get; set; }
     public string Status { get; set; } = "Available";
     public DateTime CreatedOn { get; set; }
+    public bool CanDelete { get; set; } = true;
 }
 
 public class CreateOffcutRequest

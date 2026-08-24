@@ -261,6 +261,7 @@ export interface StockAdjustmentLineDto { productId: number; productCode?: strin
 export interface StockAdjustmentDto {
   stockAdjustmentId: number; adjustmentNo?: string | null; godownId: number; godownName?: string | null
   adjustmentDate: string; status: string; reason?: string | null; lines: StockAdjustmentLineDto[]
+  canDelete: boolean
 }
 export interface CreateStockAdjustmentRequest { godownId: number; reason?: string; lines: { productId: number; actualQty: number }[] }
 
@@ -281,6 +282,7 @@ export interface OffcutDto {
   /** Which sale consumed this offcut, once used. */
   consumedByDocType?: string | null; consumedByDocId?: number | null
   godownId: number; godownName?: string | null; status: string; createdOn: string
+  canDelete: boolean
 }
 export interface CreateOffcutRequest { productId: number; lengthMm: number; widthMm: number; godownId: number }
 
