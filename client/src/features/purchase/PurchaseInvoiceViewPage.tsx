@@ -197,7 +197,7 @@ export default function PurchaseInvoiceViewPage() {
                 <thead>
                   <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-100">
                     <th className="px-4 py-2.5 font-medium min-w-[200px]">Product</th>
-                    <th className="px-4 py-2.5 font-medium w-20">Qty</th>
+                    <th className="px-4 py-2.5 font-medium w-40">Qty</th>
                     <th className="px-4 py-2.5 font-medium w-24">Area (sqm)</th>
                     <th className="px-4 py-2.5 font-medium w-24">Rate</th>
                     <th className="px-4 py-2.5 font-medium w-20">Holes Qty</th>
