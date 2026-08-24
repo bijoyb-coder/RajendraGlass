@@ -75,6 +75,7 @@ public class RackStockDto
     public decimal QtyOnHand { get; set; }
     public string? Unit { get; set; }
     public DateTime ModifiedOn { get; set; }
+    public bool CanDelete { get; set; } = true;
 }
 
 /// <summary>Records a physical count against one rack — sets that rack's ledger to the counted

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus, X, PackageSearch, ClipboardEdit, ArrowLeftRight } from 'lucide-react'
 import {
-  useListRackStockQuery, useAdjustRackStockMutation, useTransferRackStockMutation,
+  useListRackStockQuery, useAdjustRackStockMutation, useTransferRackStockMutation, useDeleteRackStockMutation,
   useListRacksQuery,
 } from './inventoryApi'
 import { useListProductsQuery } from '../masters/mastersApi'
@@ -13,6 +13,8 @@ import {
   DataGridPagination,
   DATA_GRID_HEAD_ROW_CLASS,
   DATA_GRID_ROW_CLASS,
+  ActionTh,
+  DeleteRowAction,
 } from '../../components/DataGrid'
 import type { RackStockDto } from '../../lib/types'
 
@@ -32,6 +34,7 @@ export default function RackStockPage() {
   const { data: products } = useListProductsQuery()
   const [adjustRackStock, { isLoading: adjusting }] = useAdjustRackStockMutation()
   const [transferRackStock, { isLoading: transferring }] = useTransferRackStockMutation()
+  const [deleteRackStock] = useDeleteRackStockMutation()
 
   const [showForm, setShowForm] = useState(false)
   const [mode, setMode] = useState<Mode>('Adjust')
@@ -209,13 +212,14 @@ export default function RackStockPage() {
                 <SortableTh onClick={() => toggleSort('qtyOnHand')} align="right">
                   Qty <SortIcon column="qtyOnHand" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
+                <ActionTh />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={4} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={5} className="px-5 py-14 text-center text-slate-400">
                     <PackageSearch size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No rack stock matches your search.' : 'No rack stock recorded yet — record a count to get started.'}
                   </td>
@@ -230,6 +234,13 @@ export default function RackStockPage() {
                     <div className="text-xs text-slate-400">{r.productDescription}</div>
                   </td>
                   <td className="px-5 py-3 text-right font-semibold text-slate-800">{r.qtyOnHand.toLocaleString('en-IN')} {r.unit}</td>
+                  <td className="px-5 py-3 text-right">
+                    <DeleteRowAction
+                      canDelete={r.canDelete}
+                      itemLabel={`Rack Stock ${r.productCode} @ ${r.rackCode}`}
+                      onDelete={() => deleteRackStock(r.rackStockId).unwrap()}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

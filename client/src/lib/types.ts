@@ -235,7 +235,7 @@ export interface UpdateRackRequest { name: string }
 export interface RackStockDto {
   rackStockId: number; productId: number; productCode?: string | null; productDescription?: string | null
   rackId: number; rackCode?: string | null; godownId: number; godownName?: string | null
-  qtyOnHand: number; unit?: string | null; modifiedOn: string
+  qtyOnHand: number; unit?: string | null; modifiedOn: string; canDelete: boolean
 }
 export interface AdjustRackStockRequest { rackId: number; productId: number; actualQty: number }
 export interface TransferRackStockRequest { productId: number; fromRackId: number; toRackId: number; qty: number }
