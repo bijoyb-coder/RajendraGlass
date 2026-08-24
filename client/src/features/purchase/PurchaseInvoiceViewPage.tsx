@@ -10,6 +10,15 @@ const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm 
 function money(n: number) {
   return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 }
+/** Area carries up to 9 decimal places (DB: DECIMAL(18,9)) — a plain quantity, not currency, so it
+ * gets its own formatter rather than money()'s fixed 2 decimals. */
+function areaFmt(n: number) {
+  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 9 }).format(n)
+}
+/** Rate carries up to 5 decimal places (DB: DECIMAL(18,5)). */
+function rateFmt(n: number) {
+  return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 5 }).format(n)
+}
 
 interface LineRow extends CreatePurchaseInvoiceLineRequest {
   key: string
@@ -211,11 +220,11 @@ export default function PurchaseInvoiceViewPage() {
                           </select>
                         </td>
                         <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.qty ?? ''} onChange={(e) => updateLine(line.key, { qty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                        <td className="px-4 py-2"><input type="number" min={0} step="0.001" value={line.area || ''} onChange={(e) => updateLine(line.key, { area: Number(e.target.value) })} className={inputClass} /></td>
-                        <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
-                        <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.holesQty ?? ''} onChange={(e) => updateLine(line.key, { holesQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="0.000000001" value={line.area || ''} onChange={(e) => updateLine(line.key, { area: Number(e.target.value) })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="0.00001" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.holesQty ?? ''} onChange={(e) => updateLine(line.key, { holesQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
                         <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.holesRate ?? ''} onChange={(e) => updateLine(line.key, { holesRate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                        <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.cutoutQty ?? ''} onChange={(e) => updateLine(line.key, { cutoutQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                        <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.cutoutQty ?? ''} onChange={(e) => updateLine(line.key, { cutoutQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
                         <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.cutoutRate ?? ''} onChange={(e) => updateLine(line.key, { cutoutRate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
                         <td className="px-4 py-2 text-right font-medium text-slate-700">{money(lineTotal)}</td>
                         <td className="px-2">
@@ -328,8 +337,8 @@ export default function PurchaseInvoiceViewPage() {
                     <div className="text-xs text-slate-400">{l.productCode}</div>
                   </td>
                   <td className="py-2.5 text-right">{l.qty || '—'}</td>
-                  <td className="py-2.5 text-right">{money(l.area)}</td>
-                  <td className="py-2.5 text-right">{money(l.rate)}</td>
+                  <td className="py-2.5 text-right">{areaFmt(l.area)}</td>
+                  <td className="py-2.5 text-right">{rateFmt(l.rate)}</td>
                   <td className="py-2.5 text-right">{l.holesAmount > 0 ? money(l.holesAmount) : '—'}</td>
                   <td className="py-2.5 text-right">{l.cutoutAmount > 0 ? money(l.cutoutAmount) : '—'}</td>
                   <td className="py-2.5 text-right">{money(l.basicValue)}</td>

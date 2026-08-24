@@ -221,11 +221,11 @@ export default function PurchaseInvoiceCreatePage() {
                         </select>
                       </td>
                       <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.qty ?? ''} onChange={(e) => updateLine(line.key, { qty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                      <td className="px-4 py-2"><input type="number" min={0} step="0.001" value={line.area || ''} onChange={(e) => updateLine(line.key, { area: Number(e.target.value) })} className={inputClass} /></td>
-                      <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
-                      <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.holesQty ?? ''} onChange={(e) => updateLine(line.key, { holesQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="0.000000001" value={line.area || ''} onChange={(e) => updateLine(line.key, { area: Number(e.target.value) })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="0.00001" value={line.rate || ''} onChange={(e) => updateLine(line.key, { rate: Number(e.target.value) })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.holesQty ?? ''} onChange={(e) => updateLine(line.key, { holesQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
                       <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.holesRate ?? ''} onChange={(e) => updateLine(line.key, { holesRate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
-                      <td className="px-4 py-2"><input type="number" min={0} step="1" value={line.cutoutQty ?? ''} onChange={(e) => updateLine(line.key, { cutoutQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
+                      <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.cutoutQty ?? ''} onChange={(e) => updateLine(line.key, { cutoutQty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
                       <td className="px-4 py-2"><input type="number" min={0} step="0.01" value={line.cutoutRate ?? ''} onChange={(e) => updateLine(line.key, { cutoutRate: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
                       <td className="px-4 py-2 text-right font-medium text-slate-700">{money(lineTotal)}</td>
                       <td className="px-2">
