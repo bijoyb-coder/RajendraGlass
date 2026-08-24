@@ -200,9 +200,9 @@ export default function PurchaseInvoiceViewPage() {
                     <th className="px-4 py-2.5 font-medium w-24">Qty</th>
                     <th className="px-4 py-2.5 font-medium w-40">Area (sqm)</th>
                     <th className="px-4 py-2.5 font-medium w-40">Rate</th>
-                    <th className="px-4 py-2.5 font-medium w-20">Holes Qty</th>
+                    <th className="px-4 py-2.5 font-medium w-32">Holes Qty</th>
                     <th className="px-4 py-2.5 font-medium w-24">Holes Rate</th>
-                    <th className="px-4 py-2.5 font-medium w-20">Cutout Qty</th>
+                    <th className="px-4 py-2.5 font-medium w-32">Cutout Qty</th>
                     <th className="px-4 py-2.5 font-medium w-24">Cutout Rate</th>
                     <th className="px-4 py-2.5 font-medium w-32 text-right">Line Total</th>
                     <th className="w-10" />
