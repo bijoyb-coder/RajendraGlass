@@ -698,8 +698,9 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         var result = new List<(int LineId, decimal LineTotal)>();
         foreach (var l in lines)
         {
-            decimal area = Math.Round(l.Area, 4);
-            decimal basicValue = Math.Round(area * l.Rate, 2);
+            decimal area = Math.Round(l.Area, 9);
+            decimal rate = Math.Round(l.Rate, 5);
+            decimal basicValue = Math.Round(area * rate, 2);
             decimal holesAmount = Math.Round((l.HolesQty ?? 0) * (l.HolesRate ?? 0), 2);
             decimal cutoutAmount = Math.Round((l.CutoutQty ?? 0) * (l.CutoutRate ?? 0), 2);
             decimal lineTotal = basicValue + holesAmount + cutoutAmount;
@@ -710,11 +711,11 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                      HolesQty, HolesRate, HolesAmount, CutoutQty, CutoutRate, CutoutAmount, TaxableValue, NetValue)
                   OUTPUT INSERTED.PurchaseInvoiceLineId
                   VALUES
-                    (@invoiceId, @ProductId, @Description, @Qty, @area, @Rate, @basicValue,
+                    (@invoiceId, @ProductId, @Description, @Qty, @area, @rate, @basicValue,
                      @HolesQty, @HolesRate, @holesAmount, @CutoutQty, @CutoutRate, @cutoutAmount, @lineTotal, @lineTotal)",
                 new
                 {
-                    invoiceId, l.ProductId, l.Description, Qty = l.Qty ?? 0, area, l.Rate, basicValue,
+                    invoiceId, l.ProductId, l.Description, Qty = l.Qty ?? 0, area, rate, basicValue,
                     l.HolesQty, l.HolesRate, holesAmount, l.CutoutQty, l.CutoutRate, cutoutAmount, lineTotal,
                 }, tx);
             result.Add((lineId, lineTotal));
@@ -729,8 +730,8 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                 conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand + @area WHERE StockBalanceId = @id",
                     new { area, id = (int)balance.StockBalanceId }, tx);
 
-            conn.Execute("INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty, Rate) VALUES (@ProductId, @godownId, 'Purchase', 'PurchaseInvoice', @invoiceId, @area, @Rate)",
-                new { l.ProductId, godownId, invoiceId, area, l.Rate }, tx);
+            conn.Execute("INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty, Rate) VALUES (@ProductId, @godownId, 'Purchase', 'PurchaseInvoice', @invoiceId, @area, @rate)",
+                new { l.ProductId, godownId, invoiceId, area, rate }, tx);
         }
         return result;
     }
