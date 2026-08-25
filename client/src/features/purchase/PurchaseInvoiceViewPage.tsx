@@ -75,7 +75,7 @@ export default function PurchaseInvoiceViewPage() {
       gstPct: pi.gstPct ?? 18,
     })
     setRoundOffEnabled(pi.roundOffEnabled)
-    setRoundOffValue(pi.roundOffEnabled ? pi.roundOff : '')
+    setRoundOffValue(pi.roundOff ? Math.abs(pi.roundOff) : '')
     setLines(pi.lines.map((l) => ({
       key: crypto.randomUUID(), productId: l.productId, description: l.description ?? undefined,
       qty: l.qty, area: l.area, rate: l.rate,
@@ -125,7 +125,7 @@ export default function PurchaseInvoiceViewPage() {
             holesQty: l.holesQty, holesRate: l.holesRate, cutoutQty: l.cutoutQty, cutoutRate: l.cutoutRate,
           })),
           roundOffEnabled,
-          roundOffValue: roundOffEnabled ? Number(roundOffValue) || 0 : 0,
+          roundOffValue: Number(roundOffValue) || 0,
         },
       }).unwrap()
       setEditing(false)
@@ -369,22 +369,18 @@ export default function PurchaseInvoiceViewPage() {
               <div className="flex items-center justify-between gap-2 text-slate-500">
                 <select
                   value={roundOffEnabled ? 'On' : 'Off'}
-                  onChange={(e) => { const on = e.target.value === 'On'; setRoundOffEnabled(on); if (!on) setRoundOffValue('') }}
+                  onChange={(e) => setRoundOffEnabled(e.target.value === 'On')}
                   className="text-xs rounded border border-slate-300 px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
                 >
                   <option value="Off">Round Off</option>
                   <option value="On">Round On</option>
                 </select>
-                {roundOffEnabled ? (
-                  <input
-                    type="number" step="0.01" value={roundOffValue}
-                    onChange={(e) => setRoundOffValue(e.target.value ? Number(e.target.value) : '')}
-                    className="w-24 text-sm rounded border border-slate-300 px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
-                    placeholder="0.00"
-                  />
-                ) : (
-                  <span className="text-slate-700 font-medium">{money(pi.roundOff)}</span>
-                )}
+                <input
+                  type="number" step="0.01" value={roundOffValue}
+                  onChange={(e) => setRoundOffValue(e.target.value ? Number(e.target.value) : '')}
+                  className="w-24 text-sm rounded border border-slate-300 px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
+                  placeholder="0.00"
+                />
               </div>
             ) : (
               <Row label="Round Off" value={money(pi.roundOff)} />

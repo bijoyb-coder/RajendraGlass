@@ -53,9 +53,9 @@ function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, i
   const sgst = isInterState ? 0 : tax - cgst
   const igst = isInterState ? tax : 0
   const totalBeforeRound = assessableValue + tax
-  // "Round On" applies whatever figure the operator typed off the paper invoice.
-  // "Round Off" auto-rounds the total to the nearest whole rupee.
-  const roundOff = roundOffEnabled ? (roundOffValue || 0) : Math.round((Math.round(totalBeforeRound) - totalBeforeRound) * 100) / 100
+  // The operator always types the round-off figure. "Round On" adds it to the total;
+  // "Round Off" subtracts it.
+  const roundOff = roundOffEnabled ? (roundOffValue || 0) : -(roundOffValue || 0)
   const total = Math.round((totalBeforeRound + roundOff) * 100) / 100
   return { basicAmountTotal, chargeAmounts, chargesTotal, assessableValue, cgst, sgst, igst, roundOff, total }
 }
@@ -129,7 +129,7 @@ export default function PurchaseInvoiceCreatePage() {
           holesQty: l.holesQty, holesRate: l.holesRate, cutoutQty: l.cutoutQty, cutoutRate: l.cutoutRate,
         })),
         roundOffEnabled,
-        roundOffValue: roundOffEnabled ? Number(roundOffValue) || 0 : 0,
+        roundOffValue: Number(roundOffValue) || 0,
       }).unwrap()
       navigate(`/purchase/invoices/${result.purchaseInvoiceId}`)
     } catch (err: any) {
@@ -308,22 +308,18 @@ export default function PurchaseInvoiceCreatePage() {
               <div className="flex items-center justify-between gap-2 text-slate-500">
                 <select
                   value={roundOffEnabled ? 'On' : 'Off'}
-                  onChange={(e) => { const on = e.target.value === 'On'; setRoundOffEnabled(on); if (!on) setRoundOffValue('') }}
+                  onChange={(e) => setRoundOffEnabled(e.target.value === 'On')}
                   className="text-xs rounded border border-slate-300 px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
                 >
                   <option value="Off">Round Off</option>
                   <option value="On">Round On</option>
                 </select>
-                {roundOffEnabled ? (
-                  <input
-                    type="number" step="0.01" value={roundOffValue}
-                    onChange={(e) => setRoundOffValue(e.target.value ? Number(e.target.value) : '')}
-                    className="w-24 text-sm rounded border border-slate-300 px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
-                    placeholder="0.00"
-                  />
-                ) : (
-                  <span className="text-slate-700 font-medium">{money(totals.roundOff)}</span>
-                )}
+                <input
+                  type="number" step="0.01" value={roundOffValue}
+                  onChange={(e) => setRoundOffValue(e.target.value ? Number(e.target.value) : '')}
+                  className="w-24 text-sm rounded border border-slate-300 px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
+                  placeholder="0.00"
+                />
               </div>
               <div className="flex justify-between font-bold text-brand-900 border-t border-slate-200 pt-1.5 mt-1.5">
                 <span>Total</span><span>{money(totals.total)}</span>
