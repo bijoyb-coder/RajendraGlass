@@ -441,9 +441,8 @@ public class PurchaseInvoiceDto
     public decimal CgstValue { get; set; }
     public decimal SgstValue { get; set; }
     public decimal IgstValue { get; set; }
-    /// <summary>"Round On" — an operator-entered adjustment (RoundOff carries whatever value they
-    /// typed off the paper invoice, not an automatic nearest-rupee calculation) — vs "Round Off",
-    /// where RoundOff is always 0 and TotalValue is the exact taxed figure.</summary>
+    /// <summary>The operator always types the round-off figure (RoundOff). "Round On" adds it to
+    /// the total; "Round Off" subtracts it.</summary>
     public bool RoundOffEnabled { get; set; }
     public decimal RoundOff { get; set; }
     public decimal TotalValue { get; set; }
@@ -499,11 +498,9 @@ public class CreatePurchaseInvoiceRequest
     /// point (Basic Amount + every charge before it), not the raw Basic Amount.</summary>
     public List<CreatePurchaseInvoiceChargeRequest> Charges { get; set; } = new();
     public List<CreatePurchaseInvoiceLineRequest> Lines { get; set; } = new();
-    /// <summary>"Round On" lets the operator type their own round-off adjustment (RoundOffValue);
-    /// "Round Off" (the default) applies none — the Total is the exact taxed figure.</summary>
+    /// <summary>The operator always types the round-off figure (RoundOffValue). "Round On" adds it
+    /// to the total; "Round Off" (the default) subtracts it.</summary>
     public bool RoundOffEnabled { get; set; }
-    /// <summary>Only applied when RoundOffEnabled is true — the exact figure the operator entered
-    /// off the paper invoice (can be negative), not a computed nearest-rupee value.</summary>
     public decimal RoundOffValue { get; set; }
 }
 

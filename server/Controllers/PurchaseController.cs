@@ -769,9 +769,9 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         if (isInterState) igstValue = tax; else { cgstValue = Math.Round(tax / 2m, 2); sgstValue = tax - cgstValue; }
 
         decimal totalBeforeRound = assessableValue + tax;
-        // "Round On" applies whatever figure the operator typed off the paper invoice.
-        // "Round Off" auto-rounds the total to the nearest whole rupee.
-        decimal roundOff = roundOffEnabled ? roundOffValue : Math.Round(Math.Round(totalBeforeRound, 0) - totalBeforeRound, 2);
+        // The operator always types the round-off figure. "Round On" adds it to the total;
+        // "Round Off" subtracts it.
+        decimal roundOff = roundOffEnabled ? roundOffValue : -roundOffValue;
         decimal rounded = Math.Round(totalBeforeRound + roundOff, 2);
 
         conn.Execute(
