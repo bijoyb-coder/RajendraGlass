@@ -782,42 +782,10 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
               WHERE PurchaseInvoiceId = @invoiceId",
             new { invoiceId, basicAmountTotal, chargesTotal, assessableValue, gstPct, cgstValue, sgstValue, igstValue, roundOffEnabled, roundOff, rounded }, tx);
 
-        // Informational per-line split — proportional to each line's own share of Basic Amount,
-        // with the rounding residual absorbed by the last line so the columns sum exactly.
-        decimal chargesAllocated = 0, cgstAllocated = 0, sgstAllocated = 0, igstAllocated = 0;
-        for (int i = 0; i < lineTotals.Count; i++)
-        {
-            var (lineId, lineTotal) = lineTotals[i];
-            bool isLast = i == lineTotals.Count - 1;
-            decimal shareRatio = basicAmountTotal > 0 ? lineTotal / basicAmountTotal : 0;
-
-            decimal lineCharges = isLast ? chargesTotal - chargesAllocated : Math.Round(chargesTotal * shareRatio, 2);
-            chargesAllocated += lineCharges;
-            decimal lineAssessable = lineTotal + lineCharges;
-
-            decimal lineCgst, lineSgst, lineIgst;
-            if (isLast)
-            {
-                lineCgst = cgstValue - cgstAllocated;
-                lineSgst = sgstValue - sgstAllocated;
-                lineIgst = igstValue - igstAllocated;
-            }
-            else
-            {
-                decimal lineTax = Math.Round(lineAssessable * gstPct / 100m, 2);
-                lineIgst = isInterState ? lineTax : 0;
-                lineCgst = isInterState ? 0 : Math.Round(lineTax / 2m, 2);
-                lineSgst = isInterState ? 0 : lineTax - lineCgst;
-            }
-            cgstAllocated += lineCgst; sgstAllocated += lineSgst; igstAllocated += lineIgst;
-            decimal lineNet = lineAssessable + lineCgst + lineSgst + lineIgst;
-
-            conn.Execute(
-                @"UPDATE Purchase.PurchaseInvoiceLine SET
-                    TaxableValue = @lineAssessable, CgstAmount = @lineCgst, SgstAmount = @lineSgst, IgstAmount = @lineIgst, NetValue = @lineNet
-                  WHERE PurchaseInvoiceLineId = @lineId",
-                new { lineId, lineAssessable, lineCgst, lineSgst, lineIgst, lineNet }, tx);
-        }
+        // Per-line NetValue is left exactly as inserted — BasicValue + HolesAmount + CutoutAmount,
+        // the line's own price with no proportional share of header Charges/GST folded in. Charges
+        // and GST are shown only in the invoice-level totals now (see #40), so there is nothing to
+        // reconcile per line here.
     }
 
     /// <summary>Reverses the stock this invoice's lines added so far, refusing with 409 if any of
