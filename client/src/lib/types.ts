@@ -394,7 +394,11 @@ export interface PurchaseInvoiceDto {
   /** The single invoice-wide GST rate, applied once to taxableValue (Basic + Charges) — not per
    * line. Null on invoices booked before this became header-level. */
   gstPct?: number | null
-  taxableValue: number; cgstValue: number; sgstValue: number; igstValue: number; roundOff: number
+  taxableValue: number; cgstValue: number; sgstValue: number; igstValue: number
+  /** Whether totalValue was rounded to the nearest whole rupee (roundOff carries the delta) or
+   * left as the exact taxed figure (roundOff is then always 0). Defaults true. */
+  roundOffEnabled: boolean
+  roundOff: number
   totalValue: number; status: string
   /** True unless the stock this invoice added has since moved on (checked authoritatively at
    * delete time — same caveat GrnDto.canDelete carries). */
@@ -428,6 +432,9 @@ export interface CreatePurchaseInvoiceRequest {
   /** Applied in this order — a 'Percent' charge's base is the running total at that point. */
   charges: CreatePurchaseInvoiceChargeRequest[]
   lines: CreatePurchaseInvoiceLineRequest[]
+  /** Whether to round the total to the nearest whole rupee. Defaults true (the behaviour every
+   * invoice had before this became optional). */
+  roundOffEnabled?: boolean
 }
 /** Fixes a wrong supplier reference number, e-Way Bill selection, date — and, unlike most other
  * documents in this app, the line items themselves. */
@@ -442,6 +449,8 @@ export interface UpdatePurchaseInvoiceRequest {
   lines?: CreatePurchaseInvoiceLineRequest[]
   charges?: CreatePurchaseInvoiceChargeRequest[]
   gstPct?: number
+  /** Travels with lines/charges/gstPct — only takes effect when those are sent too. Defaults true. */
+  roundOffEnabled?: boolean
 }
 
 /** Entered once off the supplier's e-Way Bill slip/QR printout, then picked from a dropdown when
