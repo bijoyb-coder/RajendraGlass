@@ -38,7 +38,7 @@ function priceLine(line: LineRow) {
  * 'Percent' charge is computed against the running subtotal at that point (Basic Amount plus every
  * charge entered before it), not the raw Basic Amount — matching how real supplier invoices
  * (Dhandhania Industries) actually cascade Admin Charge → Installation → Freight → Insurance. */
-function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, isInterState: boolean) {
+function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, isInterState: boolean, roundOffEnabled: boolean) {
   const basicAmountTotal = lines.reduce((sum, l) => sum + priceLine(l).lineTotal, 0)
   let runningSubtotal = basicAmountTotal
   const chargeAmounts = charges.map((c) => {
@@ -53,8 +53,8 @@ function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, i
   const sgst = isInterState ? 0 : tax - cgst
   const igst = isInterState ? tax : 0
   const totalBeforeRound = assessableValue + tax
-  const total = Math.round(totalBeforeRound)
-  const roundOff = total - totalBeforeRound
+  const total = roundOffEnabled ? Math.round(totalBeforeRound) : Math.round(totalBeforeRound * 100) / 100
+  const roundOff = roundOffEnabled ? total - totalBeforeRound : 0
   return { basicAmountTotal, chargeAmounts, chargesTotal, assessableValue, cgst, sgst, igst, roundOff, total }
 }
 
@@ -76,6 +76,7 @@ export default function PurchaseInvoiceCreatePage() {
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [isInterState, setIsInterState] = useState(false) // Local is the default — drives only the header CGST+SGST-vs-IGST split
   const [gstPct, setGstPct] = useState<number | ''>(18)
+  const [roundOffEnabled, setRoundOffEnabled] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const [lines, setLines] = useState<LineRow[]>([emptyLine()])
@@ -94,7 +95,7 @@ export default function PurchaseInvoiceCreatePage() {
     updateLine(key, { productId, rate: product?.purchaseRate ?? 0 })
   }
 
-  const totals = useMemo(() => computeTotals(lines, charges, Number(gstPct) || 0, isInterState), [lines, charges, gstPct, isInterState])
+  const totals = useMemo(() => computeTotals(lines, charges, Number(gstPct) || 0, isInterState, roundOffEnabled), [lines, charges, gstPct, isInterState, roundOffEnabled])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -121,6 +122,7 @@ export default function PurchaseInvoiceCreatePage() {
           productId: l.productId, description: l.description, qty: l.qty, area: l.area, rate: l.rate,
           holesQty: l.holesQty, holesRate: l.holesRate, cutoutQty: l.cutoutQty, cutoutRate: l.cutoutRate,
         })),
+        roundOffEnabled,
       }).unwrap()
       navigate(`/purchase/invoices/${result.purchaseInvoiceId}`)
     } catch (err: any) {
@@ -182,6 +184,12 @@ export default function PurchaseInvoiceCreatePage() {
             </Field>
             <Field label="GST % *">
               <input type="number" required min={0} step="0.01" value={gstPct} onChange={(e) => setGstPct(e.target.value ? Number(e.target.value) : '')} className={inputClass} />
+            </Field>
+            <Field label="Rounding">
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer h-[42px]">
+                <input type="checkbox" checked={roundOffEnabled} onChange={(e) => setRoundOffEnabled(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+                Round off to nearest ₹1
+              </label>
             </Field>
           </div>
         </div>
@@ -296,7 +304,7 @@ export default function PurchaseInvoiceCreatePage() {
                   <Row label="SGST" value={money(totals.sgst)} />
                 </>
               )}
-              <Row label="Round Off" value={money(totals.roundOff)} />
+              {roundOffEnabled && <Row label="Round Off" value={money(totals.roundOff)} />}
               <div className="flex justify-between font-bold text-brand-900 border-t border-slate-200 pt-1.5 mt-1.5">
                 <span>Total</span><span>{money(totals.total)}</span>
               </div>

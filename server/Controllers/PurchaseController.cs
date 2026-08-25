@@ -538,7 +538,8 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         @"pi.PurchaseInvoiceId, pi.InvoiceNo, pi.SupplierId, s.Name AS SupplierName,
           pi.PurchaseOrderId, po.PoNo, pi.GrnId, g.GrnNo, pi.GodownId, gd.Name AS GodownName,
           pi.SupplierInvoiceNo, pi.InvoiceDate, pi.EwayBillNo, pi.EwayBillId, pi.IsInterState,
-          pi.BasicValue, pi.ChargesTotal, pi.GstPct, pi.TaxableValue, pi.CgstValue, pi.SgstValue, pi.IgstValue, pi.RoundOff, pi.TotalValue, pi.Status
+          pi.BasicValue, pi.ChargesTotal, pi.GstPct, pi.TaxableValue, pi.CgstValue, pi.SgstValue, pi.IgstValue,
+          pi.RoundOffEnabled, pi.RoundOff, pi.TotalValue, pi.Status
           FROM Purchase.PurchaseInvoice pi
           LEFT JOIN Master.Supplier s ON s.SupplierId = pi.SupplierId
           LEFT JOIN Purchase.PurchaseOrder po ON po.PurchaseOrderId = pi.PurchaseOrderId
@@ -638,7 +639,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                 conn.Execute("UPDATE Purchase.EwayBill SET IsUsed = 1 WHERE EwayBillId = @EwayBillId", new { req.EwayBillId }, tx);
 
             var lineTotals = PriceInsertLinesAndMoveStock(conn, tx, id, godownId, req.Lines);
-            ApplyChargesAndTax(conn, tx, id, lineTotals, req.Charges, req.GstPct, req.IsInterState);
+            ApplyChargesAndTax(conn, tx, id, lineTotals, req.Charges, req.GstPct, req.IsInterState, req.RoundOffEnabled);
 
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'PurchaseInvoice', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
@@ -745,7 +746,8 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
     /// money actually charged, only how it's broken out per line.</summary>
     private static void ApplyChargesAndTax(
         System.Data.IDbConnection conn, System.Data.IDbTransaction tx, int invoiceId,
-        List<(int LineId, decimal LineTotal)> lineTotals, List<CreatePurchaseInvoiceChargeRequest> charges, decimal gstPct, bool isInterState)
+        List<(int LineId, decimal LineTotal)> lineTotals, List<CreatePurchaseInvoiceChargeRequest> charges, decimal gstPct, bool isInterState,
+        bool roundOffEnabled = true)
     {
         decimal basicAmountTotal = lineTotals.Sum(l => l.LineTotal);
 
@@ -767,15 +769,16 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         if (isInterState) igstValue = tax; else { cgstValue = Math.Round(tax / 2m, 2); sgstValue = tax - cgstValue; }
 
         decimal totalBeforeRound = assessableValue + tax;
-        decimal rounded = Math.Round(totalBeforeRound, 0, MidpointRounding.AwayFromZero);
-        decimal roundOff = rounded - totalBeforeRound;
+        decimal rounded = roundOffEnabled ? Math.Round(totalBeforeRound, 0, MidpointRounding.AwayFromZero) : Math.Round(totalBeforeRound, 2);
+        decimal roundOff = roundOffEnabled ? rounded - totalBeforeRound : 0m;
 
         conn.Execute(
             @"UPDATE Purchase.PurchaseInvoice SET
                 BasicValue = @basicAmountTotal, ChargesTotal = @chargesTotal, TaxableValue = @assessableValue, GstPct = @gstPct,
-                CgstValue = @cgstValue, SgstValue = @sgstValue, IgstValue = @igstValue, RoundOff = @roundOff, TotalValue = @rounded
+                CgstValue = @cgstValue, SgstValue = @sgstValue, IgstValue = @igstValue,
+                RoundOffEnabled = @roundOffEnabled, RoundOff = @roundOff, TotalValue = @rounded
               WHERE PurchaseInvoiceId = @invoiceId",
-            new { invoiceId, basicAmountTotal, chargesTotal, assessableValue, gstPct, cgstValue, sgstValue, igstValue, roundOff, rounded }, tx);
+            new { invoiceId, basicAmountTotal, chargesTotal, assessableValue, gstPct, cgstValue, sgstValue, igstValue, roundOffEnabled, roundOff, rounded }, tx);
 
         // Informational per-line split — proportional to each line's own share of Basic Amount,
         // with the rounding residual absorbed by the last line so the columns sum exactly.
@@ -892,7 +895,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                 bool isInterState = (bool)current.IsInterState;
                 int godownId = (int)current.GodownId;
                 var lineTotals = PriceInsertLinesAndMoveStock(conn, tx, id, godownId, req.Lines);
-                ApplyChargesAndTax(conn, tx, id, lineTotals, req.Charges ?? new List<CreatePurchaseInvoiceChargeRequest>(), req.GstPct.Value, isInterState);
+                ApplyChargesAndTax(conn, tx, id, lineTotals, req.Charges ?? new List<CreatePurchaseInvoiceChargeRequest>(), req.GstPct.Value, isInterState, req.RoundOffEnabled);
             }
 
             // Only touch the e-Way Bill link if the caller actually sent something -- either a new

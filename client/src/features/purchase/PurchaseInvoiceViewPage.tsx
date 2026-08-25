@@ -60,6 +60,7 @@ export default function PurchaseInvoiceViewPage() {
 
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<{ supplierInvoiceNo: string; ewayBillId: number | ''; invoiceDate: string; gstPct: number | '' }>({ supplierInvoiceNo: '', ewayBillId: '', invoiceDate: '', gstPct: '' })
+  const [roundOffEnabled, setRoundOffEnabled] = useState(true)
   const [lines, setLines] = useState<LineRow[]>([])
   const [charges, setCharges] = useState<ChargeRow[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -72,6 +73,7 @@ export default function PurchaseInvoiceViewPage() {
       invoiceDate: pi.invoiceDate.slice(0, 10),
       gstPct: pi.gstPct ?? 18,
     })
+    setRoundOffEnabled(pi.roundOffEnabled)
     setLines(pi.lines.map((l) => ({
       key: crypto.randomUUID(), productId: l.productId, description: l.description ?? undefined,
       qty: l.qty, area: l.area, rate: l.rate,
@@ -120,6 +122,7 @@ export default function PurchaseInvoiceViewPage() {
             productId: l.productId, description: l.description, qty: l.qty, area: l.area, rate: l.rate,
             holesQty: l.holesQty, holesRate: l.holesRate, cutoutQty: l.cutoutQty, cutoutRate: l.cutoutRate,
           })),
+          roundOffEnabled,
         },
       }).unwrap()
       setEditing(false)
@@ -182,6 +185,13 @@ export default function PurchaseInvoiceViewPage() {
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1">GST % *</label>
               <input type="number" required min={0} step="0.01" value={form.gstPct} onChange={(e) => setForm((f) => ({ ...f, gstPct: e.target.value ? Number(e.target.value) : '' }))} className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Rounding</label>
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer h-[42px]">
+                <input type="checkbox" checked={roundOffEnabled} onChange={(e) => setRoundOffEnabled(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+                Round off to nearest ₹1
+              </label>
             </div>
           </div>
 
@@ -359,7 +369,7 @@ export default function PurchaseInvoiceViewPage() {
             {pi.cgstValue > 0 && <Row label="CGST" value={money(pi.cgstValue)} />}
             {pi.sgstValue > 0 && <Row label="SGST" value={money(pi.sgstValue)} />}
             {pi.igstValue > 0 && <Row label="IGST" value={money(pi.igstValue)} />}
-            <Row label="Round Off" value={money(pi.roundOff)} />
+            {pi.roundOffEnabled && <Row label="Round Off" value={money(pi.roundOff)} />}
             <div className="flex justify-between font-bold text-brand-900 border-t-2 border-brand-800 pt-2 mt-2 text-base">
               <span>Total</span><span>₹ {money(pi.totalValue)}</span>
             </div>
