@@ -330,8 +330,6 @@ export default function PurchaseInvoiceViewPage() {
                 <th className="py-2 font-medium text-right">Holes</th>
                 <th className="py-2 font-medium text-right">Cutout</th>
                 <th className="py-2 font-medium text-right">Basic Value</th>
-                {pi.chargesTotal > 0 && <th className="py-2 font-medium text-right print:hidden">Charges</th>}
-                <th className="py-2 font-medium text-right print:hidden">{pi.isInterState ? 'IGST' : 'CGST+SGST'}</th>
                 <th className="py-2 font-medium text-right">Net Value</th>
               </tr>
             </thead>
@@ -348,8 +346,6 @@ export default function PurchaseInvoiceViewPage() {
                   <td className="py-2.5 text-right">{l.holesAmount > 0 ? money(l.holesAmount) : '—'}</td>
                   <td className="py-2.5 text-right">{l.cutoutAmount > 0 ? money(l.cutoutAmount) : '—'}</td>
                   <td className="py-2.5 text-right">{money(l.basicValue)}</td>
-                  {pi.chargesTotal > 0 && <td className="py-2.5 text-right text-slate-500 print:hidden">{money(l.taxableValue - l.basicValue - l.holesAmount - l.cutoutAmount)}</td>}
-                  <td className="py-2.5 text-right text-slate-500 print:hidden">{money(pi.isInterState ? l.igstAmount : l.cgstAmount + l.sgstAmount)}</td>
                   <td className="py-2.5 text-right font-medium">{money(l.netValue)}</td>
                 </tr>
               ))}
