@@ -53,9 +53,9 @@ function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, i
   const sgst = isInterState ? 0 : tax - cgst
   const igst = isInterState ? tax : 0
   const totalBeforeRound = assessableValue + tax
-  // "Round On" applies whatever figure the operator typed off the paper invoice — not an
-  // automatic nearest-rupee calculation — so the round off is theirs to enter, not derived.
-  const roundOff = roundOffEnabled ? (roundOffValue || 0) : 0
+  // "Round On" applies whatever figure the operator typed off the paper invoice.
+  // "Round Off" auto-rounds the total to the nearest whole rupee.
+  const roundOff = roundOffEnabled ? (roundOffValue || 0) : Math.round((Math.round(totalBeforeRound) - totalBeforeRound) * 100) / 100
   const total = Math.round((totalBeforeRound + roundOff) * 100) / 100
   return { basicAmountTotal, chargeAmounts, chargesTotal, assessableValue, cgst, sgst, igst, roundOff, total }
 }
@@ -322,7 +322,7 @@ export default function PurchaseInvoiceCreatePage() {
                     placeholder="0.00"
                   />
                 ) : (
-                  <span className="text-slate-700 font-medium">{money(0)}</span>
+                  <span className="text-slate-700 font-medium">{money(totals.roundOff)}</span>
                 )}
               </div>
               <div className="flex justify-between font-bold text-brand-900 border-t border-slate-200 pt-1.5 mt-1.5">

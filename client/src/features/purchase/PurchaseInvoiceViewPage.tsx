@@ -383,11 +383,11 @@ export default function PurchaseInvoiceViewPage() {
                     placeholder="0.00"
                   />
                 ) : (
-                  <span className="text-slate-700 font-medium">{money(0)}</span>
+                  <span className="text-slate-700 font-medium">{money(pi.roundOff)}</span>
                 )}
               </div>
             ) : (
-              pi.roundOffEnabled && <Row label="Round Off" value={money(pi.roundOff)} />
+              <Row label="Round Off" value={money(pi.roundOff)} />
             )}
             <div className="flex justify-between font-bold text-brand-900 border-t-2 border-brand-800 pt-2 mt-2 text-base">
               <span>Total</span><span>₹ {money(pi.totalValue)}</span>
