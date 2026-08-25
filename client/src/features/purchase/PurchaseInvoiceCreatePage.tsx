@@ -38,7 +38,7 @@ function priceLine(line: LineRow) {
  * 'Percent' charge is computed against the running subtotal at that point (Basic Amount plus every
  * charge entered before it), not the raw Basic Amount — matching how real supplier invoices
  * (Dhandhania Industries) actually cascade Admin Charge → Installation → Freight → Insurance. */
-function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, isInterState: boolean, roundOffEnabled: boolean) {
+function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, isInterState: boolean, roundOffEnabled: boolean, roundOffValue: number) {
   const basicAmountTotal = lines.reduce((sum, l) => sum + priceLine(l).lineTotal, 0)
   let runningSubtotal = basicAmountTotal
   const chargeAmounts = charges.map((c) => {
@@ -53,8 +53,10 @@ function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, i
   const sgst = isInterState ? 0 : tax - cgst
   const igst = isInterState ? tax : 0
   const totalBeforeRound = assessableValue + tax
-  const total = roundOffEnabled ? Math.round(totalBeforeRound) : Math.round(totalBeforeRound * 100) / 100
-  const roundOff = roundOffEnabled ? total - totalBeforeRound : 0
+  // "Round On" applies whatever figure the operator typed off the paper invoice — not an
+  // automatic nearest-rupee calculation — so the round off is theirs to enter, not derived.
+  const roundOff = roundOffEnabled ? (roundOffValue || 0) : 0
+  const total = Math.round((totalBeforeRound + roundOff) * 100) / 100
   return { basicAmountTotal, chargeAmounts, chargesTotal, assessableValue, cgst, sgst, igst, roundOff, total }
 }
 
@@ -76,7 +78,8 @@ export default function PurchaseInvoiceCreatePage() {
   const [invoiceDate, setInvoiceDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [isInterState, setIsInterState] = useState(false) // Local is the default — drives only the header CGST+SGST-vs-IGST split
   const [gstPct, setGstPct] = useState<number | ''>(18)
-  const [roundOffEnabled, setRoundOffEnabled] = useState(true)
+  const [roundOffEnabled, setRoundOffEnabled] = useState(false)
+  const [roundOffValue, setRoundOffValue] = useState<number | ''>('')
   const [error, setError] = useState<string | null>(null)
 
   const [lines, setLines] = useState<LineRow[]>([emptyLine()])
@@ -95,7 +98,10 @@ export default function PurchaseInvoiceCreatePage() {
     updateLine(key, { productId, rate: product?.purchaseRate ?? 0 })
   }
 
-  const totals = useMemo(() => computeTotals(lines, charges, Number(gstPct) || 0, isInterState, roundOffEnabled), [lines, charges, gstPct, isInterState, roundOffEnabled])
+  const totals = useMemo(
+    () => computeTotals(lines, charges, Number(gstPct) || 0, isInterState, roundOffEnabled, Number(roundOffValue) || 0),
+    [lines, charges, gstPct, isInterState, roundOffEnabled, roundOffValue],
+  )
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -123,6 +129,7 @@ export default function PurchaseInvoiceCreatePage() {
           holesQty: l.holesQty, holesRate: l.holesRate, cutoutQty: l.cutoutQty, cutoutRate: l.cutoutRate,
         })),
         roundOffEnabled,
+        roundOffValue: roundOffEnabled ? Number(roundOffValue) || 0 : 0,
       }).unwrap()
       navigate(`/purchase/invoices/${result.purchaseInvoiceId}`)
     } catch (err: any) {
@@ -185,12 +192,21 @@ export default function PurchaseInvoiceCreatePage() {
             <Field label="GST % *">
               <input type="number" required min={0} step="0.01" value={gstPct} onChange={(e) => setGstPct(e.target.value ? Number(e.target.value) : '')} className={inputClass} />
             </Field>
-            <Field label="Rounding">
-              <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer h-[42px]">
-                <input type="checkbox" checked={roundOffEnabled} onChange={(e) => setRoundOffEnabled(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
-                Round off to nearest ₹1
-              </label>
+            <Field label="Round Off">
+              <select
+                value={roundOffEnabled ? 'On' : 'Off'}
+                onChange={(e) => { const on = e.target.value === 'On'; setRoundOffEnabled(on); if (!on) setRoundOffValue('') }}
+                className={inputClass}
+              >
+                <option value="Off">Round Off</option>
+                <option value="On">Round On</option>
+              </select>
             </Field>
+            {roundOffEnabled && (
+              <Field label="Round Off Value">
+                <input type="number" step="0.01" value={roundOffValue} onChange={(e) => setRoundOffValue(e.target.value ? Number(e.target.value) : '')} className={inputClass} placeholder="e.g. -0.47" />
+              </Field>
+            )}
           </div>
         </div>
 

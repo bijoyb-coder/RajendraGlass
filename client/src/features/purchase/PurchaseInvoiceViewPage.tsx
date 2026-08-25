@@ -60,7 +60,8 @@ export default function PurchaseInvoiceViewPage() {
 
   const [editing, setEditing] = useState(false)
   const [form, setForm] = useState<{ supplierInvoiceNo: string; ewayBillId: number | ''; invoiceDate: string; gstPct: number | '' }>({ supplierInvoiceNo: '', ewayBillId: '', invoiceDate: '', gstPct: '' })
-  const [roundOffEnabled, setRoundOffEnabled] = useState(true)
+  const [roundOffEnabled, setRoundOffEnabled] = useState(false)
+  const [roundOffValue, setRoundOffValue] = useState<number | ''>('')
   const [lines, setLines] = useState<LineRow[]>([])
   const [charges, setCharges] = useState<ChargeRow[]>([])
   const [error, setError] = useState<string | null>(null)
@@ -74,6 +75,7 @@ export default function PurchaseInvoiceViewPage() {
       gstPct: pi.gstPct ?? 18,
     })
     setRoundOffEnabled(pi.roundOffEnabled)
+    setRoundOffValue(pi.roundOffEnabled ? pi.roundOff : '')
     setLines(pi.lines.map((l) => ({
       key: crypto.randomUUID(), productId: l.productId, description: l.description ?? undefined,
       qty: l.qty, area: l.area, rate: l.rate,
@@ -123,6 +125,7 @@ export default function PurchaseInvoiceViewPage() {
             holesQty: l.holesQty, holesRate: l.holesRate, cutoutQty: l.cutoutQty, cutoutRate: l.cutoutRate,
           })),
           roundOffEnabled,
+          roundOffValue: roundOffEnabled ? Number(roundOffValue) || 0 : 0,
         },
       }).unwrap()
       setEditing(false)
@@ -187,12 +190,22 @@ export default function PurchaseInvoiceViewPage() {
               <input type="number" required min={0} step="0.01" value={form.gstPct} onChange={(e) => setForm((f) => ({ ...f, gstPct: e.target.value ? Number(e.target.value) : '' }))} className={inputClass} />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Rounding</label>
-              <label className="inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer h-[42px]">
-                <input type="checkbox" checked={roundOffEnabled} onChange={(e) => setRoundOffEnabled(e.target.checked)} className="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
-                Round off to nearest ₹1
-              </label>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Round Off</label>
+              <select
+                value={roundOffEnabled ? 'On' : 'Off'}
+                onChange={(e) => { const on = e.target.value === 'On'; setRoundOffEnabled(on); if (!on) setRoundOffValue('') }}
+                className={inputClass}
+              >
+                <option value="Off">Round Off</option>
+                <option value="On">Round On</option>
+              </select>
             </div>
+            {roundOffEnabled && (
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Round Off Value</label>
+                <input type="number" step="0.01" value={roundOffValue} onChange={(e) => setRoundOffValue(e.target.value ? Number(e.target.value) : '')} className={inputClass} placeholder="e.g. -0.47" />
+              </div>
+            )}
           </div>
 
           <div className="border border-slate-200 rounded-lg overflow-hidden">
