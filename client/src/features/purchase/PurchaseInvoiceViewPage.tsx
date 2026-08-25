@@ -189,23 +189,6 @@ export default function PurchaseInvoiceViewPage() {
               <label className="block text-xs font-semibold text-slate-600 mb-1">GST % *</label>
               <input type="number" required min={0} step="0.01" value={form.gstPct} onChange={(e) => setForm((f) => ({ ...f, gstPct: e.target.value ? Number(e.target.value) : '' }))} className={inputClass} />
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Round Off</label>
-              <select
-                value={roundOffEnabled ? 'On' : 'Off'}
-                onChange={(e) => { const on = e.target.value === 'On'; setRoundOffEnabled(on); if (!on) setRoundOffValue('') }}
-                className={inputClass}
-              >
-                <option value="Off">Round Off</option>
-                <option value="On">Round On</option>
-              </select>
-            </div>
-            {roundOffEnabled && (
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">Round Off Value</label>
-                <input type="number" step="0.01" value={roundOffValue} onChange={(e) => setRoundOffValue(e.target.value ? Number(e.target.value) : '')} className={inputClass} placeholder="e.g. -0.47" />
-              </div>
-            )}
           </div>
 
           <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -382,7 +365,30 @@ export default function PurchaseInvoiceViewPage() {
             {pi.cgstValue > 0 && <Row label="CGST" value={money(pi.cgstValue)} />}
             {pi.sgstValue > 0 && <Row label="SGST" value={money(pi.sgstValue)} />}
             {pi.igstValue > 0 && <Row label="IGST" value={money(pi.igstValue)} />}
-            {pi.roundOffEnabled && <Row label="Round Off" value={money(pi.roundOff)} />}
+            {editing ? (
+              <div className="flex items-center justify-between gap-2 text-slate-500">
+                <select
+                  value={roundOffEnabled ? 'On' : 'Off'}
+                  onChange={(e) => { const on = e.target.value === 'On'; setRoundOffEnabled(on); if (!on) setRoundOffValue('') }}
+                  className="text-xs rounded border border-slate-300 px-1.5 py-1 focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
+                >
+                  <option value="Off">Round Off</option>
+                  <option value="On">Round On</option>
+                </select>
+                {roundOffEnabled ? (
+                  <input
+                    type="number" step="0.01" value={roundOffValue}
+                    onChange={(e) => setRoundOffValue(e.target.value ? Number(e.target.value) : '')}
+                    className="w-24 text-sm rounded border border-slate-300 px-2 py-1 text-right focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
+                    placeholder="0.00"
+                  />
+                ) : (
+                  <span className="text-slate-700 font-medium">{money(0)}</span>
+                )}
+              </div>
+            ) : (
+              pi.roundOffEnabled && <Row label="Round Off" value={money(pi.roundOff)} />
+            )}
             <div className="flex justify-between font-bold text-brand-900 border-t-2 border-brand-800 pt-2 mt-2 text-base">
               <span>Total</span><span>₹ {money(pi.totalValue)}</span>
             </div>
