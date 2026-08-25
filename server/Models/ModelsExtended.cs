@@ -441,10 +441,10 @@ public class PurchaseInvoiceDto
     public decimal CgstValue { get; set; }
     public decimal SgstValue { get; set; }
     public decimal IgstValue { get; set; }
-    /// <summary>Whether the Total was rounded to the nearest whole rupee (RoundOff carries the
-    /// delta) or left as the exact taxed figure (RoundOff is then always 0). Defaults true — the
-    /// behaviour every invoice had before this became optional.</summary>
-    public bool RoundOffEnabled { get; set; } = true;
+    /// <summary>"Round On" — an operator-entered adjustment (RoundOff carries whatever value they
+    /// typed off the paper invoice, not an automatic nearest-rupee calculation) — vs "Round Off",
+    /// where RoundOff is always 0 and TotalValue is the exact taxed figure.</summary>
+    public bool RoundOffEnabled { get; set; }
     public decimal RoundOff { get; set; }
     public decimal TotalValue { get; set; }
     public string Status { get; set; } = "Booked";
@@ -499,9 +499,12 @@ public class CreatePurchaseInvoiceRequest
     /// point (Basic Amount + every charge before it), not the raw Basic Amount.</summary>
     public List<CreatePurchaseInvoiceChargeRequest> Charges { get; set; } = new();
     public List<CreatePurchaseInvoiceLineRequest> Lines { get; set; } = new();
-    /// <summary>Whether to round the Total to the nearest whole rupee. Defaults true (the behaviour
-    /// every invoice had before this became optional).</summary>
-    public bool RoundOffEnabled { get; set; } = true;
+    /// <summary>"Round On" lets the operator type their own round-off adjustment (RoundOffValue);
+    /// "Round Off" (the default) applies none — the Total is the exact taxed figure.</summary>
+    public bool RoundOffEnabled { get; set; }
+    /// <summary>Only applied when RoundOffEnabled is true — the exact figure the operator entered
+    /// off the paper invoice (can be negative), not a computed nearest-rupee value.</summary>
+    public decimal RoundOffValue { get; set; }
 }
 
 /// <summary>Fixes a wrong supplier reference number, e-Way Bill selection, date — and, unlike most
@@ -524,9 +527,10 @@ public class UpdatePurchaseInvoiceRequest
     public List<CreatePurchaseInvoiceLineRequest>? Lines { get; set; }
     public List<CreatePurchaseInvoiceChargeRequest>? Charges { get; set; }
     public decimal? GstPct { get; set; }
-    /// <summary>Travels with Lines/Charges/GstPct — only takes effect when those are sent too
-    /// (there's no totals recompute otherwise, so nothing to apply it against). Defaults true.</summary>
-    public bool RoundOffEnabled { get; set; } = true;
+    /// <summary>Travel with Lines/Charges/GstPct — only take effect when those are sent too
+    /// (there's no totals recompute otherwise, so nothing to apply them against).</summary>
+    public bool RoundOffEnabled { get; set; }
+    public decimal RoundOffValue { get; set; }
 }
 
 // ---------- Purchase: E-way Bill Entry (master, selected from a dropdown when booking a Purchase Invoice) ----------

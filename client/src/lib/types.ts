@@ -395,8 +395,8 @@ export interface PurchaseInvoiceDto {
    * line. Null on invoices booked before this became header-level. */
   gstPct?: number | null
   taxableValue: number; cgstValue: number; sgstValue: number; igstValue: number
-  /** Whether totalValue was rounded to the nearest whole rupee (roundOff carries the delta) or
-   * left as the exact taxed figure (roundOff is then always 0). Defaults true. */
+  /** "Round On" — an operator-entered adjustment (roundOff carries whatever value they typed) —
+   * vs "Round Off", where roundOff is always 0 and totalValue is the exact taxed figure. */
   roundOffEnabled: boolean
   roundOff: number
   totalValue: number; status: string
@@ -432,9 +432,11 @@ export interface CreatePurchaseInvoiceRequest {
   /** Applied in this order — a 'Percent' charge's base is the running total at that point. */
   charges: CreatePurchaseInvoiceChargeRequest[]
   lines: CreatePurchaseInvoiceLineRequest[]
-  /** Whether to round the total to the nearest whole rupee. Defaults true (the behaviour every
-   * invoice had before this became optional). */
+  /** "Round On" lets the operator type their own round-off adjustment (roundOffValue); "Round
+   * Off" (the default) applies none — the total is the exact taxed figure. */
   roundOffEnabled?: boolean
+  /** Only applied when roundOffEnabled is true — the exact figure the operator entered. */
+  roundOffValue?: number
 }
 /** Fixes a wrong supplier reference number, e-Way Bill selection, date — and, unlike most other
  * documents in this app, the line items themselves. */
@@ -449,8 +451,9 @@ export interface UpdatePurchaseInvoiceRequest {
   lines?: CreatePurchaseInvoiceLineRequest[]
   charges?: CreatePurchaseInvoiceChargeRequest[]
   gstPct?: number
-  /** Travels with lines/charges/gstPct — only takes effect when those are sent too. Defaults true. */
+  /** Travel with lines/charges/gstPct — only take effect when those are sent too. */
   roundOffEnabled?: boolean
+  roundOffValue?: number
 }
 
 /** Entered once off the supplier's e-Way Bill slip/QR printout, then picked from a dropdown when

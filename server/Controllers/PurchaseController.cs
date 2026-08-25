@@ -639,7 +639,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                 conn.Execute("UPDATE Purchase.EwayBill SET IsUsed = 1 WHERE EwayBillId = @EwayBillId", new { req.EwayBillId }, tx);
 
             var lineTotals = PriceInsertLinesAndMoveStock(conn, tx, id, godownId, req.Lines);
-            ApplyChargesAndTax(conn, tx, id, lineTotals, req.Charges, req.GstPct, req.IsInterState, req.RoundOffEnabled);
+            ApplyChargesAndTax(conn, tx, id, lineTotals, req.Charges, req.GstPct, req.IsInterState, req.RoundOffEnabled, req.RoundOffValue);
 
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'PurchaseInvoice', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
@@ -747,7 +747,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
     private static void ApplyChargesAndTax(
         System.Data.IDbConnection conn, System.Data.IDbTransaction tx, int invoiceId,
         List<(int LineId, decimal LineTotal)> lineTotals, List<CreatePurchaseInvoiceChargeRequest> charges, decimal gstPct, bool isInterState,
-        bool roundOffEnabled = true)
+        bool roundOffEnabled = false, decimal roundOffValue = 0m)
     {
         decimal basicAmountTotal = lineTotals.Sum(l => l.LineTotal);
 
@@ -769,8 +769,10 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
         if (isInterState) igstValue = tax; else { cgstValue = Math.Round(tax / 2m, 2); sgstValue = tax - cgstValue; }
 
         decimal totalBeforeRound = assessableValue + tax;
-        decimal rounded = roundOffEnabled ? Math.Round(totalBeforeRound, 0, MidpointRounding.AwayFromZero) : Math.Round(totalBeforeRound, 2);
-        decimal roundOff = roundOffEnabled ? rounded - totalBeforeRound : 0m;
+        // "Round On" applies whatever figure the operator typed off the paper invoice — not an
+        // automatic nearest-rupee calculation — so RoundOff is theirs to enter, not derived.
+        decimal roundOff = roundOffEnabled ? roundOffValue : 0m;
+        decimal rounded = Math.Round(totalBeforeRound + roundOff, 2);
 
         conn.Execute(
             @"UPDATE Purchase.PurchaseInvoice SET
@@ -895,7 +897,7 @@ public class PurchaseInvoicesController(IDbConnectionFactory db) : ControllerBas
                 bool isInterState = (bool)current.IsInterState;
                 int godownId = (int)current.GodownId;
                 var lineTotals = PriceInsertLinesAndMoveStock(conn, tx, id, godownId, req.Lines);
-                ApplyChargesAndTax(conn, tx, id, lineTotals, req.Charges ?? new List<CreatePurchaseInvoiceChargeRequest>(), req.GstPct.Value, isInterState, req.RoundOffEnabled);
+                ApplyChargesAndTax(conn, tx, id, lineTotals, req.Charges ?? new List<CreatePurchaseInvoiceChargeRequest>(), req.GstPct.Value, isInterState, req.RoundOffEnabled, req.RoundOffValue);
             }
 
             // Only touch the e-Way Bill link if the caller actually sent something -- either a new
