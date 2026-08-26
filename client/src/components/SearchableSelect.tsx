@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 
 export interface SearchableSelectOption {
   value: number
@@ -60,6 +61,7 @@ export default function SearchableSelect({ value, options, onChange, placeholder
         value={query}
         placeholder={placeholder}
         onFocus={() => { setOpen(true); setQuery(''); setHighlighted(0) }}
+        onClick={() => { if (!open) { setOpen(true); setQuery(''); setHighlighted(0) } }}
         onChange={(e) => { setQuery(e.target.value); setOpen(true); setHighlighted(0) }}
         onKeyDown={(e) => {
           if (!open) return
@@ -69,8 +71,10 @@ export default function SearchableSelect({ value, options, onChange, placeholder
           else if (e.key === 'Escape') { setOpen(false); setQuery(selected ? selected.label : '') }
         }}
         className={className}
+        style={{ paddingRight: '2rem' }}
         autoComplete="off"
       />
+      <ChevronDown size={16} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
       {open && (
         <div className="absolute z-20 mt-1 w-full max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
           {filtered.length === 0 ? (
