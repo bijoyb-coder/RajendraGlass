@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Printer, ArrowLeft, Pencil, X, Plus, Trash2 } from 'lucide-react'
 import { useGetPurchaseInvoiceQuery, useUpdatePurchaseInvoiceMutation, useListEwayBillsQuery } from './purchaseApi'
@@ -43,6 +43,29 @@ function priceLine(line: LineRow) {
   return { basic, holesAmount, cutoutAmount, lineTotal: basic + holesAmount + cutoutAmount }
 }
 
+/** Mirrors PurchaseController.ApplyChargesAndTax exactly (same shape as the Create page's
+ * computeTotals) — a live preview of what Save will persist, so editing a charge (e.g. Discount)
+ * is reflected immediately instead of only after the round trip to the server. */
+function computeTotals(lines: LineRow[], charges: ChargeRow[], gstPct: number, isInterState: boolean, roundOffEnabled: boolean, roundOffValue: number) {
+  const basicAmountTotal = lines.reduce((sum, l) => sum + priceLine(l).lineTotal, 0)
+  let runningSubtotal = basicAmountTotal
+  const chargeAmounts = charges.map((c) => {
+    const amount = c.basis === 'Percent' ? Math.round(runningSubtotal * (c.value || 0) / 100 * 100) / 100 : (c.value || 0)
+    runningSubtotal += amount
+    return amount
+  })
+  const chargesTotal = runningSubtotal - basicAmountTotal
+  const assessableValue = runningSubtotal
+  const tax = Math.round(assessableValue * (gstPct || 0) / 100 * 100) / 100
+  const cgst = isInterState ? 0 : Math.round(tax / 2 * 100) / 100
+  const sgst = isInterState ? 0 : tax - cgst
+  const igst = isInterState ? tax : 0
+  const totalBeforeRound = assessableValue + tax
+  const roundOff = roundOffEnabled ? (roundOffValue || 0) : -(roundOffValue || 0)
+  const total = Math.round((totalBeforeRound + roundOff) * 100) / 100
+  return { basicAmountTotal, chargeAmounts, chargesTotal, assessableValue, cgst, sgst, igst, roundOff, total }
+}
+
 /** Purchase Invoice — entered directly from the supplier's paper tax invoice, stock added on save.
  * Editing the lines reverses the stock this invoice added and re-applies it for the new lines
  * (refused if any of it has already moved on elsewhere) — the Local/Inter-State mode itself is
@@ -65,6 +88,11 @@ export default function PurchaseInvoiceViewPage() {
   const [lines, setLines] = useState<LineRow[]>([])
   const [charges, setCharges] = useState<ChargeRow[]>([])
   const [error, setError] = useState<string | null>(null)
+
+  const totals = useMemo(
+    () => computeTotals(lines, charges, Number(form.gstPct) || 0, pi?.isInterState ?? false, roundOffEnabled, Number(roundOffValue) || 0),
+    [lines, charges, form.gstPct, pi, roundOffEnabled, roundOffValue],
+  )
 
   function openEdit() {
     if (!pi) return
@@ -334,33 +362,66 @@ export default function PurchaseInvoiceViewPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {pi.lines.map((l, i) => (
-                <tr key={i}>
-                  <td className="py-2.5">
-                    <div className="font-medium text-slate-800">{l.description ?? l.productDescription}</div>
-                    <div className="text-xs text-slate-400">{l.productCode}</div>
-                  </td>
-                  <td className="py-2.5 text-right">{l.qty || '—'}</td>
-                  <td className="py-2.5 text-right">{areaFmt(l.area)}</td>
-                  <td className="py-2.5 text-right">{rateFmt(l.rate)}</td>
-                  <td className="py-2.5 text-right">{l.holesAmount > 0 ? money(l.holesAmount) : '—'}</td>
-                  <td className="py-2.5 text-right">{l.cutoutAmount > 0 ? money(l.cutoutAmount) : '—'}</td>
-                  <td className="py-2.5 text-right">{money(l.basicValue)}</td>
-                  <td className="py-2.5 text-right font-medium">{money(l.netValue)}</td>
-                </tr>
-              ))}
+              {editing
+                ? lines.map((line) => {
+                    const product = products?.items.find((p) => p.productId === line.productId)
+                    const { basic, holesAmount, cutoutAmount, lineTotal } = priceLine(line)
+                    return (
+                      <tr key={line.key}>
+                        <td className="py-2.5">
+                          <div className="font-medium text-slate-800">{line.description ?? product?.description ?? '—'}</div>
+                          <div className="text-xs text-slate-400">{product?.code ?? '—'}</div>
+                        </td>
+                        <td className="py-2.5 text-right">{line.qty || '—'}</td>
+                        <td className="py-2.5 text-right">{areaFmt(line.area)}</td>
+                        <td className="py-2.5 text-right">{rateFmt(line.rate)}</td>
+                        <td className="py-2.5 text-right">{holesAmount > 0 ? money(holesAmount) : '—'}</td>
+                        <td className="py-2.5 text-right">{cutoutAmount > 0 ? money(cutoutAmount) : '—'}</td>
+                        <td className="py-2.5 text-right">{money(basic)}</td>
+                        <td className="py-2.5 text-right font-medium">{money(lineTotal)}</td>
+                      </tr>
+                    )
+                  })
+                : pi.lines.map((l, i) => (
+                    <tr key={i}>
+                      <td className="py-2.5">
+                        <div className="font-medium text-slate-800">{l.description ?? l.productDescription}</div>
+                        <div className="text-xs text-slate-400">{l.productCode}</div>
+                      </td>
+                      <td className="py-2.5 text-right">{l.qty || '—'}</td>
+                      <td className="py-2.5 text-right">{areaFmt(l.area)}</td>
+                      <td className="py-2.5 text-right">{rateFmt(l.rate)}</td>
+                      <td className="py-2.5 text-right">{l.holesAmount > 0 ? money(l.holesAmount) : '—'}</td>
+                      <td className="py-2.5 text-right">{l.cutoutAmount > 0 ? money(l.cutoutAmount) : '—'}</td>
+                      <td className="py-2.5 text-right">{money(l.basicValue)}</td>
+                      <td className="py-2.5 text-right font-medium">{money(l.netValue)}</td>
+                    </tr>
+                  ))}
             </tbody>
           </table>
         </div>
 
         <div className="flex justify-end mb-6">
           <div className="w-72 space-y-1.5 text-sm">
-            <Row label="Basic Amount" value={money(pi.basicValue)} />
-            {pi.charges.map((c, i) => <Row key={i} label={c.label} value={money(c.amount)} />)}
-            <Row label="Assessable Value" value={money(pi.taxableValue)} />
-            {pi.cgstValue > 0 && <Row label="CGST" value={money(pi.cgstValue)} />}
-            {pi.sgstValue > 0 && <Row label="SGST" value={money(pi.sgstValue)} />}
-            {pi.igstValue > 0 && <Row label="IGST" value={money(pi.igstValue)} />}
+            {editing ? (
+              <>
+                <Row label="Basic Amount" value={money(totals.basicAmountTotal)} />
+                {charges.map((c, i) => <Row key={c.key} label={c.label || `Charge ${i + 1}`} value={money(totals.chargeAmounts[i] ?? 0)} />)}
+                <Row label="Assessable Value" value={money(totals.assessableValue)} />
+                {totals.cgst > 0 && <Row label="CGST" value={money(totals.cgst)} />}
+                {totals.sgst > 0 && <Row label="SGST" value={money(totals.sgst)} />}
+                {totals.igst > 0 && <Row label="IGST" value={money(totals.igst)} />}
+              </>
+            ) : (
+              <>
+                <Row label="Basic Amount" value={money(pi.basicValue)} />
+                {pi.charges.map((c, i) => <Row key={i} label={c.label} value={money(c.amount)} />)}
+                <Row label="Assessable Value" value={money(pi.taxableValue)} />
+                {pi.cgstValue > 0 && <Row label="CGST" value={money(pi.cgstValue)} />}
+                {pi.sgstValue > 0 && <Row label="SGST" value={money(pi.sgstValue)} />}
+                {pi.igstValue > 0 && <Row label="IGST" value={money(pi.igstValue)} />}
+              </>
+            )}
             {editing ? (
               <div className="flex items-center justify-between gap-2 text-slate-500">
                 <select
@@ -382,7 +443,7 @@ export default function PurchaseInvoiceViewPage() {
               <Row label="Round Off" value={money(pi.roundOff)} />
             )}
             <div className="flex justify-between font-bold text-brand-900 border-t-2 border-brand-800 pt-2 mt-2 text-base">
-              <span>Total</span><span>₹ {money(pi.totalValue)}</span>
+              <span>Total</span><span>₹ {money(editing ? totals.total : pi.totalValue)}</span>
             </div>
           </div>
         </div>
