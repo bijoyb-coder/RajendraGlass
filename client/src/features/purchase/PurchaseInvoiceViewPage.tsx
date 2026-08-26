@@ -4,6 +4,7 @@ import { Printer, ArrowLeft, Pencil, X, Plus, Trash2 } from 'lucide-react'
 import { useGetPurchaseInvoiceQuery, useUpdatePurchaseInvoiceMutation, useListEwayBillsQuery } from './purchaseApi'
 import { useListProductsQuery } from '../masters/mastersApi'
 import Logo from '../../components/Logo'
+import SearchableSelect from '../../components/SearchableSelect'
 import type { CreatePurchaseInvoiceLineRequest, CreatePurchaseInvoiceChargeRequest } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
@@ -248,10 +249,13 @@ export default function PurchaseInvoiceViewPage() {
                     return (
                       <tr key={line.key}>
                         <td className="px-4 py-2">
-                          <select value={line.productId || ''} onChange={(e) => onProductChange(line.key, Number(e.target.value))} className={inputClass}>
-                            <option value="">Select product…</option>
-                            {products?.items.map((p) => <option key={p.productId} value={p.productId}>{p.code} — {p.description}</option>)}
-                          </select>
+                          <SearchableSelect
+                            value={line.productId || ''}
+                            onChange={(productId) => onProductChange(line.key, productId)}
+                            options={products?.items.map((p) => ({ value: p.productId, label: `${p.code} — ${p.description}` })) ?? []}
+                            placeholder="Select product…"
+                            className={inputClass}
+                          />
                         </td>
                         <td className="px-4 py-2"><input type="number" min={0} step="0.001" value={line.qty ?? ''} onChange={(e) => updateLine(line.key, { qty: e.target.value ? Number(e.target.value) : undefined })} className={inputClass} /></td>
                         <td className="px-4 py-2"><input type="number" min={0} step="0.000000001" value={line.area || ''} onChange={(e) => updateLine(line.key, { area: Number(e.target.value) })} className={inputClass} /></td>
