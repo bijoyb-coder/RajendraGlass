@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 
 export interface SearchableSelectOption {
@@ -16,12 +17,21 @@ interface Props {
 
 /** A plain-text-searchable dropdown — types to filter, click or Enter to pick. Used in place of a
  * native <select> wherever the option list is long enough that scrolling through it by hand (e.g.
- * hundreds of products by code/description) is slower than typing a few characters. */
+ * hundreds of products by code/description) is slower than typing a few characters.
+ *
+ * The option list is rendered through a portal into document.body, positioned with `fixed`
+ * coordinates read off the input's own bounding box. It has to live outside the input's own DOM
+ * subtree: every call site so far places this inside a horizontally-scrolling table
+ * (`overflow-x-auto`), and setting overflow on one axis forces the browser to compute the other
+ * axis to `auto` too — so a plain `position: absolute` panel nested inside that container gets
+ * clipped by it instead of floating above the table. */
 export default function SearchableSelect({ value, options, onChange, placeholder = 'Select…', className }: Props) {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
+  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const selected = options.find((o) => o.value === value)
 
@@ -34,15 +44,35 @@ export default function SearchableSelect({ value, options, onChange, placeholder
 
   useEffect(() => {
     function onClickOutside(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-        setQuery(selected ? selected.label : '')
-      }
+      const target = e.target as Node
+      if (containerRef.current?.contains(target)) return
+      // The portalled list isn't inside containerRef in the DOM tree — its own onMouseDown
+      // (preventDefault + select) already handles clicks on an option, so anything else outside
+      // the input closes the list.
+      setOpen(false)
+      setQuery(selected ? selected.label : '')
     }
     document.addEventListener('mousedown', onClickOutside)
     return () => document.removeEventListener('mousedown', onClickOutside)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selected])
+
+  // Recompute the portal's position whenever it opens, and keep it pinned to the input while
+  // scrolling (the table wrapper, the page, or any other ancestor) or resizing.
+  useLayoutEffect(() => {
+    if (!open) return
+    function updateRect() {
+      const r = inputRef.current?.getBoundingClientRect()
+      if (r) setRect({ top: r.bottom, left: r.left, width: r.width })
+    }
+    updateRect()
+    window.addEventListener('scroll', updateRect, true)
+    window.addEventListener('resize', updateRect)
+    return () => {
+      window.removeEventListener('scroll', updateRect, true)
+      window.removeEventListener('resize', updateRect)
+    }
+  }, [open])
 
   const filtered = query.trim() === ''
     ? options
@@ -57,6 +87,7 @@ export default function SearchableSelect({ value, options, onChange, placeholder
   return (
     <div className="relative" ref={containerRef}>
       <input
+        ref={inputRef}
         type="text"
         value={query}
         placeholder={placeholder}
@@ -75,8 +106,11 @@ export default function SearchableSelect({ value, options, onChange, placeholder
         autoComplete="off"
       />
       <ChevronDown size={16} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
-      {open && (
-        <div className="absolute z-20 mt-1 w-full max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+      {open && rect && createPortal(
+        <div
+          style={{ position: 'fixed', top: rect.top + 4, left: rect.left, width: rect.width }}
+          className="z-50 max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg"
+        >
           {filtered.length === 0 ? (
             <div className="px-3 py-2 text-sm text-slate-400">No matches</div>
           ) : (
@@ -91,7 +125,8 @@ export default function SearchableSelect({ value, options, onChange, placeholder
               </button>
             ))
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
