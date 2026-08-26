@@ -29,7 +29,7 @@ export default function SearchableSelect({ value, options, onChange, placeholder
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
   const [highlighted, setHighlighted] = useState(0)
-  const [rect, setRect] = useState<{ top: number; left: number; width: number } | null>(null)
+  const [rect, setRect] = useState<{ top: number; left: number; width: number; panelWidth: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -63,7 +63,15 @@ export default function SearchableSelect({ value, options, onChange, placeholder
     if (!open) return
     function updateRect() {
       const r = inputRef.current?.getBoundingClientRect()
-      if (r) setRect({ top: r.bottom, left: r.left, width: r.width })
+      if (!r) return
+      // The input itself is often just wide enough for a rate/qty column, far too narrow for a
+      // full "code — description" label (the longest product label runs ~72 characters) — so the
+      // panel widens to whichever is bigger, capped to the viewport and shifted left if it would
+      // otherwise run off the right edge.
+      const minPanelWidth = 620
+      const panelWidth = Math.min(Math.max(r.width, minPanelWidth), window.innerWidth - 16)
+      const left = Math.min(r.left, window.innerWidth - panelWidth - 8)
+      setRect({ top: r.bottom, left, width: r.width, panelWidth })
     }
     updateRect()
     window.addEventListener('scroll', updateRect, true)
@@ -108,7 +116,7 @@ export default function SearchableSelect({ value, options, onChange, placeholder
       <ChevronDown size={16} className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
       {open && rect && createPortal(
         <div
-          style={{ position: 'fixed', top: rect.top + 4, left: rect.left, width: rect.width }}
+          style={{ position: 'fixed', top: rect.top + 4, left: rect.left, width: rect.panelWidth }}
           className="z-50 max-h-60 overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg"
         >
           {filtered.length === 0 ? (
@@ -119,7 +127,7 @@ export default function SearchableSelect({ value, options, onChange, placeholder
                 type="button"
                 key={o.value}
                 onMouseDown={(e) => { e.preventDefault(); selectOption(o) }}
-                className={`block w-full text-left px-3 py-2 text-sm truncate ${i === highlighted ? 'bg-brand-50 text-brand-700' : 'text-slate-700 hover:bg-slate-50'}`}
+                className={`block w-full text-left px-3 py-2 text-sm whitespace-nowrap ${i === highlighted ? 'bg-brand-50 text-brand-700' : 'text-slate-700 hover:bg-slate-50'}`}
               >
                 {o.label}
               </button>
