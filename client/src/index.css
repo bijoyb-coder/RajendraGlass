@@ -93,6 +93,12 @@ body {
 @media print {
   .no-print { display: none !important; }
   body { background: white; }
+  /* AppShell's sidebar/topbar are hidden via .no-print above, but the shell itself is a
+     `h-screen` flex row with `overflow-y-auto` on <main> -- fine on screen (only the sidebar/main
+     content scroll independently), but on print that combination clips everything past one
+     viewport's worth of height instead of flowing the invoice across pages. Let the whole chain
+     size to its content and paginate naturally instead. */
+  html, body, #root, #root > div, main { height: auto !important; overflow: visible !important; }
 }
 
 /* ---------- Dark theme retrofit ---------------------------------------------------
