@@ -1,5 +1,5 @@
 import { api } from '../../app/api'
-import type { QuotationDto, CreateQuotationRequest, UpdateQuotationRequest, SalesOrderDto, CreateSalesOrderRequest } from '../../lib/types'
+import type { QuotationDto, CreateQuotationRequest, UpdateQuotationRequest, SalesOrderDto, CreateSalesOrderRequest, QuotationCuttingProductDto } from '../../lib/types'
 
 export const salesExtraApi = api.injectEndpoints({
   endpoints: (builder) => ({
@@ -22,6 +22,12 @@ export const salesExtraApi = api.injectEndpoints({
     deleteQuotation: builder.mutation<void, number>({
       query: (id) => ({ url: `/quotations/${id}`, method: 'DELETE' }),
       invalidatesTags: ['Quotation'],
+    }),
+    /** Feeds the Cutting Entry product picker -- only this quotation's own (area-rated) lines,
+     * never the full product master. */
+    getQuotationCuttingProducts: builder.query<{ items: QuotationCuttingProductDto[] }, number>({
+      query: (quotationId) => `/quotations/${quotationId}/cutting-products`,
+      providesTags: (_result, _error, quotationId) => [{ type: 'Quotation', id: quotationId }],
     }),
 
     listSalesOrders: builder.query<{ items: SalesOrderDto[] }, void>({
@@ -52,6 +58,7 @@ export const {
   useDeleteQuotationMutation,
   useGetQuotationQuery,
   useLazyGetQuotationQuery,
+  useLazyGetQuotationCuttingProductsQuery,
   useListSalesOrdersQuery,
   useGetSalesOrderQuery,
   useLazyGetSalesOrderQuery,

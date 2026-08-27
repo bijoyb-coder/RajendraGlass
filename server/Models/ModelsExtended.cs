@@ -1121,3 +1121,84 @@ public class SalesRegisterRow
     public decimal TaxValue { get; set; }
     public decimal TotalValue { get; set; }
 }
+
+// ---------- Cutting Entry (Quotation -> Cutting) ----------
+
+/// <summary>One line of a Quotation, as offered to the Cutting Entry product picker -- deliberately
+/// its own DTO rather than reusing QuotationLineDto, since that one doesn't expose QuotationLineId
+/// (nothing needed it until Cutting Entry, which must pin to the exact quoted line, not just the
+/// product, per the multiple-lines-same-product case). Only area-rated lines are offered (PER_SQFT/
+/// PER_SQM) -- a PER_PIECE line has no per-square-foot rate for Cutting's SQFT billing to use.</summary>
+public class QuotationCuttingProductDto
+{
+    public int QuotationLineId { get; set; }
+    public int ProductId { get; set; }
+    public string ProductCode { get; set; } = "";
+    public string ProductDescription { get; set; } = "";
+    public decimal Rate { get; set; }
+    public string RateUnit { get; set; } = "";
+}
+
+public class CuttingEntryLineDto
+{
+    public int CuttingEntryLineId { get; set; }
+    public int SerialNo { get; set; }
+    public int QuotationLineId { get; set; }
+    public int ProductId { get; set; }
+    public string ProductCode { get; set; } = "";
+    public string ProductDescription { get; set; } = "";
+    public decimal ActualHeight { get; set; }
+    public decimal ActualWidth { get; set; }
+    public string? ActualHeightText { get; set; }
+    public string? ActualWidthText { get; set; }
+    public int Pcs { get; set; }
+    public decimal ChargeableHeight { get; set; }
+    public decimal ChargeableWidth { get; set; }
+    public decimal Sqft { get; set; }
+    public decimal Rate { get; set; }
+    public decimal Amount { get; set; }
+    public int GodownId { get; set; }
+    public string GodownName { get; set; } = "";
+    public int? RackId { get; set; }
+    public string? RackName { get; set; }
+}
+
+public class CuttingEntryDto
+{
+    public int CuttingEntryId { get; set; }
+    public string CuttingNo { get; set; } = "";
+    public DateTime CuttingDate { get; set; }
+    public int QuotationId { get; set; }
+    public string? QuotationNo { get; set; }
+    public string? CustomerName { get; set; }
+    public int TotalPcs { get; set; }
+    public decimal TotalSqft { get; set; }
+    public decimal TotalGlassValue { get; set; }
+    public decimal VanFair { get; set; }
+    public decimal TotalBillAmount { get; set; }
+    public string Status { get; set; } = "Booked";
+    public DateTime CreatedOn { get; set; }
+    public List<CuttingEntryLineDto> Lines { get; set; } = new();
+}
+
+public class CreateCuttingEntryLineRequest
+{
+    public int QuotationLineId { get; set; }
+    /// <summary>Raw text as typed, e.g. "20¼", "20 1/4" or "20.25" -- parsed and validated
+    /// server-side via GlassDimensionParser; the server never trusts a client-computed decimal.</summary>
+    public string ActualHeightText { get; set; } = "";
+    public string ActualWidthText { get; set; } = "";
+    public int Pcs { get; set; }
+    public decimal ChargeableHeight { get; set; }
+    public decimal ChargeableWidth { get; set; }
+    public int GodownId { get; set; }
+    public int? RackId { get; set; }
+}
+
+public class CreateCuttingEntryRequest
+{
+    public int QuotationId { get; set; }
+    public DateTime CuttingDate { get; set; }
+    public decimal VanFair { get; set; }
+    public List<CreateCuttingEntryLineRequest> Lines { get; set; } = new();
+}

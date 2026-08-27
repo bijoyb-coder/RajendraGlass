@@ -99,6 +99,28 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         return Ok(q);
     }
 
+    /// <summary>Feeds the Cutting Entry product picker (client/src/features/cutting/CuttingEntryCreatePage.tsx)
+    /// -- only this quotation's own lines, never the full product master, and only area-rated ones
+    /// (PER_SQFT/PER_SQM), since a PER_PIECE line has no per-square-foot rate for Cutting's SQFT
+    /// billing to use. QuotationLineId is exposed here (unlike QuotationLineDto above) because
+    /// Cutting Entry must pin to the exact quoted line, not just the product -- the same product
+    /// can appear more than once in a quotation at different rates.</summary>
+    [HttpGet("{id:int}/cutting-products")]
+    public IActionResult GetCuttingProducts(int id)
+    {
+        using var conn = db.CreateConnection();
+        var exists = conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Sales.Quotation WHERE QuotationId = @id", new { id });
+        if (exists == 0) return NotFound();
+
+        var rows = conn.Query<QuotationCuttingProductDto>(
+            @"SELECT l.QuotationLineId, l.ProductId, p.Code AS ProductCode, p.Description AS ProductDescription, l.Rate, l.RateUnit
+              FROM Sales.QuotationLine l
+              JOIN Master.Product p ON p.ProductId = l.ProductId
+              WHERE l.QuotationId = @id AND l.RateUnit IN ('PER_SQFT', 'PER_SQM')
+              ORDER BY l.QuotationLineId", new { id });
+        return Ok(new { items = rows });
+    }
+
     [RequirePermission("Quotation.Create")]
     [HttpPost]
     public IActionResult Create([FromBody] CreateQuotationRequest req)

@@ -36,26 +36,30 @@ export function alertWarning(title: string, text?: string) {
   return themedSwal().fire({ icon: 'warning', title, text, confirmButtonText: 'OK' })
 }
 
-/** A brief, self-dismissing confirmation — doesn't demand a click. */
-export function alertSuccess(title: string, text?: string) {
+/** A brief, self-dismissing confirmation — doesn't demand a click. Pass `timer` to give a longer
+ * (or shorter) read than the 2.2s default, e.g. when `text` carries several lines of figures the
+ * user actually needs to read (a save summary), not just a one-word acknowledgement. */
+export function alertSuccess(title: string, text?: string, timer = 2200) {
   return themedSwal().fire({
     icon: 'success',
     title,
     text,
-    timer: 2200,
+    timer,
     showConfirmButton: false,
   })
 }
 
-/** Yes/No confirmation before an irreversible or consequential action. Resolves true on confirm. */
-export async function confirmAction(title: string, text?: string, confirmButtonText = 'Yes, continue') {
+/** Yes/No confirmation before an irreversible or consequential action. Resolves true on confirm.
+ * `cancelButtonText` defaults to 'Cancel'; pass a different label (e.g. 'No') when the choice isn't
+ * a literal cancel of the action just taken but a fork into a different next step. */
+export async function confirmAction(title: string, text?: string, confirmButtonText = 'Yes, continue', cancelButtonText = 'Cancel') {
   const result = await themedSwal().fire({
     icon: 'question',
     title,
     text,
     showCancelButton: true,
     confirmButtonText,
-    cancelButtonText: 'Cancel',
+    cancelButtonText,
   })
   return result.isConfirmed
 }

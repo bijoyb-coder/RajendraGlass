@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Plus,
   X,
@@ -31,7 +31,7 @@ import SalesLineGrid, {
 } from "./SalesLineGrid";
 import type { SalesLine } from "./SalesLineGrid";
 import { useStockSummaryQuery } from "../reports/reportsApi";
-import { alertError } from "../../lib/alerts";
+import { alertError, confirmAction } from "../../lib/alerts";
 import {
   useDataGrid,
   SortIcon,
@@ -86,6 +86,7 @@ function isEditable(status: string) {
 type SortKey = "quotationNo" | "quotationDate" | "customerName" | "totalValue" | "status";
 
 export default function QuotationsPage() {
+  const navigate = useNavigate();
   const { data, isLoading } = useListQuotationsQuery();
   const { data: customers } = useListCustomersQuery();
   const { data: products } = useListProductsQuery();
@@ -222,15 +223,26 @@ export default function QuotationsPage() {
           id: editingId,
           body: { customerId: Number(customerId), lines: payload },
         }).unwrap();
+        setShowForm(false);
+        resetForm();
       } else {
-        await createQuotation({
+        const result = await createQuotation({
           customerId: newCustomerMode ? 0 : Number(customerId),
           newCustomer: newCustomerMode ? newCustomer : undefined,
           lines: payload,
         }).unwrap();
+        setShowForm(false);
+        resetForm();
+        // Flow A: offer to jump straight into Cutting with this quotation and its products
+        // already loaded, so the operator never has to look it up and re-select it.
+        const goToCutting = await confirmAction(
+          "Quotation saved successfully",
+          "Do you want to process Cutting?",
+          "Yes, Process Cutting",
+          "No",
+        );
+        if (goToCutting) navigate(`/sales/cutting/new?quotationId=${result.quotationId}`);
       }
-      setShowForm(false);
-      resetForm();
     } catch (err: any) {
       alertError(
         editingId ? "Could not save the changes" : "Could not save the quotation",

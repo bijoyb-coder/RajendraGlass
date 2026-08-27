@@ -730,3 +730,39 @@ export interface CustomerTransactionReport {
   items: CustomerTransactionRow[]
   totalSales: number; totalPayments: number; balance: number
 }
+
+// ---------- Cutting Entry (Quotation -> Cutting) ----------
+/** One line of a quotation, scoped to that quotation only -- never the full product master.
+ * Only area-rated lines (PER_SQFT/PER_SQM) are offered; a PER_PIECE line has no per-sqft rate. */
+export interface QuotationCuttingProductDto {
+  quotationLineId: number; productId: number; productCode: string; productDescription: string
+  rate: number; rateUnit: string
+}
+
+export interface CuttingEntryLineDto {
+  cuttingEntryLineId: number; serialNo: number; quotationLineId: number; productId: number
+  productCode: string; productDescription: string
+  actualHeight: number; actualWidth: number; actualHeightText?: string | null; actualWidthText?: string | null
+  pcs: number; chargeableHeight: number; chargeableWidth: number; sqft: number; rate: number; amount: number
+  godownId: number; godownName: string; rackId?: number | null; rackName?: string | null
+}
+
+export interface CuttingEntryDto {
+  cuttingEntryId: number; cuttingNo: string; cuttingDate: string
+  quotationId: number; quotationNo?: string | null; customerName?: string | null
+  totalPcs: number; totalSqft: number; totalGlassValue: number; vanFair: number; totalBillAmount: number
+  status: string; createdOn: string
+  lines: CuttingEntryLineDto[]
+}
+
+export interface CreateCuttingEntryLineRequest {
+  quotationLineId: number
+  actualHeightText: string; actualWidthText: string
+  pcs: number; chargeableHeight: number; chargeableWidth: number
+  godownId: number; rackId?: number
+}
+
+export interface CreateCuttingEntryRequest {
+  quotationId: number; cuttingDate: string; vanFair: number
+  lines: CreateCuttingEntryLineRequest[]
+}
