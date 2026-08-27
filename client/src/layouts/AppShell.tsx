@@ -54,7 +54,7 @@ export default function AppShell() {
     <div className="h-screen flex bg-slate-50 text-slate-800">
       {/* Sidebar */}
       <aside
-        className={`${sidebarOpen ? 'w-64' : 'w-[76px]'} hidden md:flex flex-col bg-gradient-to-b from-brand-950 via-brand-900 to-brand-800 text-white transition-[width] duration-300 ease-in-out shrink-0 relative overflow-hidden`}
+        className={`no-print ${sidebarOpen ? 'w-64' : 'w-[76px]'} hidden md:flex flex-col bg-gradient-to-b from-brand-950 via-brand-900 to-brand-800 text-white transition-[width] duration-300 ease-in-out shrink-0 relative overflow-hidden`}
       >
         <div className="absolute inset-0 opacity-[0.06] pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, white 1px, transparent 1px)', backgroundSize: '18px 18px' }} />
         <div className="relative h-16 flex items-center px-4 border-b border-white/10">
@@ -129,7 +129,7 @@ export default function AppShell() {
 
       {/* Mobile sidebar */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-40 md:hidden">
+        <div className="no-print fixed inset-0 z-40 md:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
           <aside className="absolute left-0 top-0 bottom-0 w-72 bg-gradient-to-b from-brand-950 to-brand-800 text-white flex flex-col animate-sidebar-in">
             <div className="h-16 flex items-center justify-between px-4 border-b border-white/10">
@@ -170,7 +170,7 @@ export default function AppShell() {
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Topbar */}
-        <header className="h-16 shrink-0 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 shadow-sm">
+        <header className="no-print h-16 shrink-0 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 shadow-sm">
           <div className="flex items-center gap-3">
             <button className="md:hidden text-slate-500" onClick={() => setMobileOpen(true)}>
               <Menu size={22} />
