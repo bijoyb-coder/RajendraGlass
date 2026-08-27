@@ -101,6 +101,20 @@ body {
   html, body, #root, #root > div, main { height: auto !important; overflow: visible !important; }
 }
 
+/* Paged.js (see src/lib/pagedPrint.ts) renders its own paginated copy of an invoice into
+   #pagedjs-print-root, appended straight to <body> -- outside #root entirely. It needs to stay
+   hidden on screen until printing, but NOT via display:none or position:fixed on the pages
+   themselves -- Paged.js measures each page with getBoundingClientRect()/offsetParent while laying
+   it out, and both of those return nothing useful on an element (or an ancestor) that isn't
+   actually in the normal layout flow, which is exactly what display:none/position:fixed do. Instead
+   the wrapper we create is collapsed to zero height with overflow:hidden -- its contents still get
+   real layout, just clipped from view -- and only expanded once printing actually starts. */
+#pagedjs-print-root { height: 0; overflow: hidden; }
+@media print {
+  body.pagedjs-printing #root { display: none !important; }
+  body.pagedjs-printing #pagedjs-print-root { height: auto; overflow: visible; }
+}
+
 /* ---------- Dark theme retrofit ---------------------------------------------------
    Every screen in the app (dashboard, masters, sales, inventory, etc. — ~46 files)
    was built against one consistent light palette: white cards, a slate-50 page
