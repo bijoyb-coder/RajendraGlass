@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { Printer, ArrowLeft, Pencil, X, Plus, Trash2 } from 'lucide-react'
 import { useGetPurchaseInvoiceQuery, useUpdatePurchaseInvoiceMutation, useListEwayBillsQuery } from './purchaseApi'
@@ -6,6 +6,7 @@ import { useListProductsQuery } from '../masters/mastersApi'
 import Logo from '../../components/Logo'
 import SearchableSelect from '../../components/SearchableSelect'
 import type { CreatePurchaseInvoiceLineRequest, CreatePurchaseInvoiceChargeRequest } from '../../lib/types'
+import { printPaged } from '../../lib/pagedPrint'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
 function money(n: number) {
@@ -89,6 +90,7 @@ export default function PurchaseInvoiceViewPage() {
   const [lines, setLines] = useState<LineRow[]>([])
   const [charges, setCharges] = useState<ChargeRow[]>([])
   const [error, setError] = useState<string | null>(null)
+  const printRef = useRef<HTMLDivElement>(null)
 
   const totals = useMemo(
     () => computeTotals(lines, charges, Number(form.gstPct) || 0, pi?.isInterState ?? false, roundOffEnabled, Number(roundOffValue) || 0),
@@ -190,7 +192,10 @@ export default function PurchaseInvoiceViewPage() {
           >
             {editing ? <X size={15} /> : <Pencil size={15} />} {editing ? 'Cancel' : 'Edit'}
           </button>
-          <button onClick={() => window.print()} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow transition">
+          <button
+            onClick={() => printRef.current && printPaged(printRef.current)}
+            className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow transition"
+          >
             <Printer size={15} /> Print
           </button>
         </div>
@@ -329,26 +334,30 @@ export default function PurchaseInvoiceViewPage() {
         </form>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 print:shadow-none print:border-0">
-        <div className="flex items-start justify-between border-b-2 border-brand-800 pb-4 mb-4">
-          <Logo variant="dark" size="md" showTagline />
-          <div className="text-right">
-            <h2 className="text-lg font-bold text-brand-900">PURCHASE INVOICE</h2>
-            <p className="text-xs text-slate-500">{pi.isInterState ? 'Inter-State (IGST)' : 'Local (CGST + SGST)'}</p>
+      <div ref={printRef} className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 print:shadow-none print:border-0">
+        {/* Repeated at the top of every printed page (see pagedjs-print.css in pagedPrint.ts) when
+            the invoice runs past one page -- printed once, normally, here on the first page. */}
+        <div className="pagedjs-print-header">
+          <div className="flex items-start justify-between border-b-2 border-brand-800 pb-4 mb-4">
+            <Logo variant="dark" size="md" showTagline />
+            <div className="text-right">
+              <h2 className="text-lg font-bold text-brand-900">PURCHASE INVOICE</h2>
+              <p className="text-xs text-slate-500">{pi.isInterState ? 'Inter-State (IGST)' : 'Local (CGST + SGST)'}</p>
+            </div>
           </div>
-        </div>
 
-        <div className="grid grid-cols-3 gap-4 text-xs bg-slate-50 rounded-lg p-4 mb-6">
-          <Detail label="Invoice No." value={pi.invoiceNo ?? '—'} />
-          <Detail label="Invoice Date" value={new Date(pi.invoiceDate).toLocaleDateString('en-IN')} />
-          <Detail label="Supplier" value={pi.supplierName ?? '—'} />
-          <Detail label="Supplier Invoice No." value={pi.supplierInvoiceNo ?? '—'} />
-          <Detail label="e-Way Bill No." value={pi.ewayBillNo ?? '—'} />
-          <Detail label="Godown" value={pi.godownName ?? '—'} />
-          <Detail label="Type" value={pi.isInterState ? 'Inter-State' : 'Local'} />
-          <Detail label="Against PO" value={pi.poNo ?? '—'} />
-          <Detail label="Against GRN" value={pi.grnNo ?? '—'} />
-          <Detail label="Status" value={pi.status} />
+          <div className="grid grid-cols-3 gap-4 text-xs bg-slate-50 rounded-lg p-4 mb-6">
+            <Detail label="Invoice No." value={pi.invoiceNo ?? '—'} />
+            <Detail label="Invoice Date" value={new Date(pi.invoiceDate).toLocaleDateString('en-IN')} />
+            <Detail label="Supplier" value={pi.supplierName ?? '—'} />
+            <Detail label="Supplier Invoice No." value={pi.supplierInvoiceNo ?? '—'} />
+            <Detail label="e-Way Bill No." value={pi.ewayBillNo ?? '—'} />
+            <Detail label="Godown" value={pi.godownName ?? '—'} />
+            <Detail label="Type" value={pi.isInterState ? 'Inter-State' : 'Local'} />
+            <Detail label="Against PO" value={pi.poNo ?? '—'} />
+            <Detail label="Against GRN" value={pi.grnNo ?? '—'} />
+            <Detail label="Status" value={pi.status} />
+          </div>
         </div>
 
         <div className="overflow-x-auto">

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import QRCode from 'qrcode'
 import { Printer, Truck, ArrowLeft, ShieldCheck, XCircle, Loader2 } from 'lucide-react'
@@ -6,6 +6,7 @@ import { useGetInvoiceQuery, useGenerateEInvoiceMutation, useCancelEInvoiceMutat
 import { useGetCompanyQuery } from '../masters/mastersApi'
 import Logo from '../../components/Logo'
 import { Can } from '../../lib/permissions'
+import { printPaged } from '../../lib/pagedPrint'
 
 function money(n: number) {
   return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -21,6 +22,7 @@ export default function InvoiceViewPage() {
 
   const [qrDataUrl, setQrDataUrl] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const printRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (invoice?.irnQrPayload) {
@@ -88,7 +90,10 @@ export default function InvoiceViewPage() {
           >
             <Truck size={15} /> Generate Waybill
           </Link>
-          <button onClick={() => window.print()} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow transition">
+          <button
+            onClick={() => printRef.current && printPaged(printRef.current)}
+            className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow transition"
+          >
             <Printer size={15} /> Print
           </button>
         </div>
@@ -96,52 +101,56 @@ export default function InvoiceViewPage() {
 
       {error && <div className="no-print mb-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5">{error}</div>}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 print:shadow-none print:border-0">
-        <div className="flex items-start justify-between border-b-2 border-brand-800 pb-4 mb-4">
-          <Logo variant="dark" size="md" showTagline />
-          <div className="text-right">
-            <h2 className="text-lg font-bold text-brand-900">TAX INVOICE</h2>
-            <p className="text-xs text-slate-500">(See Section 31 of the GST Act, 2017 &amp; Rule 46 of CGST Rules, 2017)</p>
-          </div>
-        </div>
-
-        {invoice.eInvoiceStatus === 'Generated' && (
-          <div className="flex items-start gap-4 bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-4">
-            {qrDataUrl && <img src={qrDataUrl} alt="e-Invoice QR" className="rounded border border-emerald-200 bg-white" />}
-            <div className="text-xs space-y-1">
-              <p className="flex items-center gap-1.5 text-emerald-800 font-semibold text-sm"><ShieldCheck size={14} /> e-Invoice Generated (IRN)</p>
-              <p className="text-emerald-700 break-all"><span className="text-emerald-500">IRN:</span> {invoice.irnNo}</p>
-              <p className="text-emerald-700"><span className="text-emerald-500">Ack No:</span> {invoice.irnAckNo} &nbsp; <span className="text-emerald-500">Ack Date:</span> {invoice.irnAckDate ? new Date(invoice.irnAckDate).toLocaleString('en-IN') : '—'}</p>
+      <div ref={printRef} className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 print:shadow-none print:border-0">
+        {/* Repeated at the top of every printed page (see pagedjs-print.css in pagedPrint.ts) when
+            the invoice runs past one page -- printed once, normally, here on the first page. */}
+        <div className="pagedjs-print-header">
+          <div className="flex items-start justify-between border-b-2 border-brand-800 pb-4 mb-4">
+            <Logo variant="dark" size="md" showTagline />
+            <div className="text-right">
+              <h2 className="text-lg font-bold text-brand-900">TAX INVOICE</h2>
+              <p className="text-xs text-slate-500">(See Section 31 of the GST Act, 2017 &amp; Rule 46 of CGST Rules, 2017)</p>
             </div>
           </div>
-        )}
 
-        <div className="grid grid-cols-2 gap-6 text-sm mb-4">
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase mb-1">Seller</p>
-            <p className="font-semibold text-slate-800">{company?.legalName}</p>
-            <p className="text-slate-500">{company?.businessAddress}</p>
-            <p className="text-slate-500">GSTIN: {company?.gstin} &nbsp; PAN: {company?.pan}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-slate-400 uppercase mb-1">Buyer / Recipient</p>
-            <p className="font-semibold text-slate-800">{invoice.customerName}</p>
-            <p className="text-slate-500">{invoice.customerAddress}</p>
-            <p className="text-slate-500">GSTIN: {invoice.customerGstin ?? '—'}</p>
-          </div>
-        </div>
+          {invoice.eInvoiceStatus === 'Generated' && (
+            <div className="flex items-start gap-4 bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-4">
+              {qrDataUrl && <img src={qrDataUrl} alt="e-Invoice QR" className="rounded border border-emerald-200 bg-white" />}
+              <div className="text-xs space-y-1">
+                <p className="flex items-center gap-1.5 text-emerald-800 font-semibold text-sm"><ShieldCheck size={14} /> e-Invoice Generated (IRN)</p>
+                <p className="text-emerald-700 break-all"><span className="text-emerald-500">IRN:</span> {invoice.irnNo}</p>
+                <p className="text-emerald-700"><span className="text-emerald-500">Ack No:</span> {invoice.irnAckNo} &nbsp; <span className="text-emerald-500">Ack Date:</span> {invoice.irnAckDate ? new Date(invoice.irnAckDate).toLocaleString('en-IN') : '—'}</p>
+              </div>
+            </div>
+          )}
 
-        <div className="grid grid-cols-3 gap-4 text-xs bg-slate-50 rounded-lg p-4 mb-6">
-          <Detail label="Invoice No." value={invoice.invoiceNo ?? '—'} />
-          <Detail label="Invoice Date" value={new Date(invoice.invoiceDate).toLocaleDateString('en-IN')} />
-          <Detail label="Against Sales Order" value={invoice.orderNo ?? '—'} />
-          <Detail label="Place of Supply" value={invoice.placeOfSupply ?? '—'} />
-          <Detail label="Customer Order Ref." value={invoice.customerOrderRef ?? '—'} />
-          <Detail label="Transporter" value={invoice.transporterName ?? '—'} />
-          <Detail label="Vehicle No." value={invoice.vehicleNo ?? '—'} />
-          <Detail label="Destination" value={invoice.destination ?? '—'} />
-          <Detail label="Status" value={invoice.status} />
-          <Detail label="e-Way Bill No." value={invoice.ewayBillNo ?? 'Not generated'} />
+          <div className="grid grid-cols-2 gap-6 text-sm mb-4">
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase mb-1">Seller</p>
+              <p className="font-semibold text-slate-800">{company?.legalName}</p>
+              <p className="text-slate-500">{company?.businessAddress}</p>
+              <p className="text-slate-500">GSTIN: {company?.gstin} &nbsp; PAN: {company?.pan}</p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-400 uppercase mb-1">Buyer / Recipient</p>
+              <p className="font-semibold text-slate-800">{invoice.customerName}</p>
+              <p className="text-slate-500">{invoice.customerAddress}</p>
+              <p className="text-slate-500">GSTIN: {invoice.customerGstin ?? '—'}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-4 text-xs bg-slate-50 rounded-lg p-4 mb-6">
+            <Detail label="Invoice No." value={invoice.invoiceNo ?? '—'} />
+            <Detail label="Invoice Date" value={new Date(invoice.invoiceDate).toLocaleDateString('en-IN')} />
+            <Detail label="Against Sales Order" value={invoice.orderNo ?? '—'} />
+            <Detail label="Place of Supply" value={invoice.placeOfSupply ?? '—'} />
+            <Detail label="Customer Order Ref." value={invoice.customerOrderRef ?? '—'} />
+            <Detail label="Transporter" value={invoice.transporterName ?? '—'} />
+            <Detail label="Vehicle No." value={invoice.vehicleNo ?? '—'} />
+            <Detail label="Destination" value={invoice.destination ?? '—'} />
+            <Detail label="Status" value={invoice.status} />
+            <Detail label="e-Way Bill No." value={invoice.ewayBillNo ?? 'Not generated'} />
+          </div>
         </div>
 
         <table className="w-full text-sm mb-6">
