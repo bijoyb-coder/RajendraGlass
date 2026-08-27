@@ -10,6 +10,9 @@ import InvoiceCreatePage from './features/sales/InvoiceCreatePage'
 import InvoiceViewPage from './features/sales/InvoiceViewPage'
 import QuotationsPage from './features/sales/QuotationsPage'
 import QuotationViewPage from './features/sales/QuotationViewPage'
+import CuttingEntryListPage from './features/cutting/CuttingEntryListPage'
+import CuttingEntryCreatePage from './features/cutting/CuttingEntryCreatePage'
+import CuttingEntryViewPage from './features/cutting/CuttingEntryViewPage'
 import SalesOrdersPage from './features/sales/SalesOrdersPage'
 import SalesOrderViewPage from './features/sales/SalesOrderViewPage'
 import CounterBillingPage from './features/counter/CounterBillingPage'
@@ -73,6 +76,9 @@ export default function App() {
 
             <Route path="/sales/quotations" element={<QuotationsPage />} />
             <Route path="/sales/quotations/:id" element={<QuotationViewPage />} />
+            <Route path="/sales/cutting" element={<CuttingEntryListPage />} />
+            <Route path="/sales/cutting/new" element={<CuttingEntryCreatePage />} />
+            <Route path="/sales/cutting/:id" element={<CuttingEntryViewPage />} />
             <Route path="/sales/orders" element={<SalesOrdersPage />} />
             <Route path="/sales/orders/:id" element={<SalesOrderViewPage />} />
             <Route path="/sales/counter-billing" element={<CounterBillingPage />} />

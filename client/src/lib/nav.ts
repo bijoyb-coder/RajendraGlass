@@ -4,7 +4,7 @@ import {
   Building2, Layers, Users, Factory, Warehouse,
   Boxes, ClipboardEdit, ArrowLeftRight, Puzzle, PackageSearch,
   ShoppingCart, PackageCheck, FileStack, ScanLine,
-  Scissors, Wrench, LayoutList, Flame,
+  Scissors, Wrench, LayoutList, Flame, Ruler,
   Wallet, Receipt as ReceiptIcon, Wallet2,
   HeartHandshake,
   IdCard, CalendarCheck2,
@@ -33,6 +33,7 @@ export const navSections: { title: string; items: NavItem[] }[] = [
     title: 'Sales & Dispatch',
     items: [
       { label: 'Quotations', path: '/sales/quotations', icon: FileText, implemented: true, perm: 'Quotation.View' },
+      { label: 'Cutting', path: '/sales/cutting', icon: Ruler, implemented: true, perm: 'CuttingEntry.View' },
       { label: 'Sales Orders', path: '/sales/orders', icon: ClipboardList, implemented: true, perm: 'SalesOrder.View' },
       { label: 'Sales Invoices', path: '/sales/invoices', icon: Receipt, implemented: true, perm: 'Invoice.View' },
       { label: 'Waybills / e-Way Bills', path: '/dispatch/waybills', icon: Truck, implemented: true, perm: 'Waybill.View' },
