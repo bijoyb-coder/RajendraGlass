@@ -23,17 +23,6 @@ function registerContinuedNoteHandler() {
     afterPageLayout(pageElement: HTMLElement, _page: unknown, breakToken: unknown) {
       this.pageNum += 1
 
-      // Paged.js's running-element polyfill mirrors ".pagedjs-print-header" into the top margin
-      // box starting on the very page its source naturally occurs on (page 1) -- not only once it
-      // has scrolled off into an earlier page, as the CSS spec intends -- so left alone, page 1
-      // shows the header twice: once in its normal place, once again at the top margin. The CSS
-      // `@page :first { @top-center { content: none } }` rule is meant to suppress that copy, but
-      // doesn't reliably override the JS-inserted clone, so clear it here directly instead.
-      if (this.pageNum === 1) {
-        const topMarginContent = pageElement.querySelector('.pagedjs_margin-top-center .pagedjs_margin-content')
-        if (topMarginContent) topMarginContent.innerHTML = ''
-      }
-
       if (!breakToken) return // no more content after this page -- it's the last one
       const bottomMarginContent = pageElement.querySelector('.pagedjs_margin-bottom-center .pagedjs_margin-content')
       if (!bottomMarginContent) return
@@ -50,11 +39,13 @@ function registerContinuedNoteHandler() {
 const PAGE_CSS = `
   @page {
     size: A4;
-    /* The top margin has to be tall enough to hold the whole repeated header once it starts
-       appearing there from page 2 onward -- measured at ~84mm for the Purchase Invoice header
-       (logo, title, 10-field detail grid). The Sales Invoice header is taller still (adds a
-       Seller/Buyer grid and, when present, the e-Invoice QR block), so 105mm leaves a safe margin
-       for both without per-invoice-type tuning. */
+    /* .pagedjs-print-header is a position:running() element -- it never occupies space in the
+       normal content flow on ANY page (page 1 included); it only ever appears via the element()
+       reference below. So the top margin has to be tall enough to hold it on every single page,
+       not just from page 2 onward. Measured at ~84mm for the Purchase Invoice header (logo, title,
+       10-field detail grid). The Sales Invoice header is taller still (adds a Seller/Buyer grid
+       and, when present, the e-Invoice QR block), so 105mm leaves a safe margin for both without
+       per-invoice-type tuning. */
     margin: 105mm 14mm 20mm 14mm;
     @top-center {
       content: element(pagedjsPrintHeader);
@@ -67,16 +58,6 @@ const PAGE_CSS = `
   }
   .pagedjs-print-header {
     position: running(pagedjsPrintHeader);
-  }
-  /* Paged.js's running-element polyfill leaves the header rendering inline on the page where it
-     naturally occurs (page 1) *and* starts mirroring it into the top margin box from that same
-     page onward -- rather than only once the header has scrolled off into an earlier page, as the
-     real Paged Media spec intends. Suppressing the margin-box copy on the first page avoids
-     showing the header twice there; every later page still gets it repeated normally. */
-  @page :first {
-    @top-center {
-      content: none;
-    }
   }
   .pagedjs-continued-note {
     font-size: 9px;
@@ -91,37 +72,58 @@ const PAGE_CSS = `
 /** Prints `sourceEl` (a detached clone of it, never the live element itself) through Paged.js
  * instead of a plain `window.print()`, so a multi-page invoice gets a repeated header, real page
  * numbers, and a "Continued on page N" note on every page but the last. */
+let printInProgress = false
+
 export async function printPaged(sourceEl: HTMLElement) {
-  registerContinuedNoteHandler()
+  // Pagination takes a moment, so a second click before the first run finishes (or the print
+  // dialog has closed) used to leave two `#pagedjs-print-root` containers in the document at
+  // once -- both visible to the print engine simultaneously, producing a merged, half-finished
+  // result (one run's pages, plus a second run's still-mid-layout page with no total page count
+  // yet). Ignore any call that arrives while one is already in flight instead.
+  if (printInProgress) return
+  printInProgress = true
 
-  // The app's own compiled stylesheet -- needed so the cloned invoice markup keeps its Tailwind
-  // classes' actual styling once it's re-parsed into Paged.js's separate rendering pipeline.
-  const stylesheetHref = [...document.styleSheets]
-    .map((s) => s.href)
-    .find((href): href is string => !!href && href.includes('/assets/'))
+  try {
+    registerContinuedNoteHandler()
 
-  const container = document.createElement('div')
-  container.id = 'pagedjs-print-root'
-  document.body.appendChild(container)
+    // Guard against any leftover container from an interrupted previous run (e.g. the tab was
+    // closed mid-print) rather than trusting `printInProgress` alone.
+    document.querySelectorAll('#pagedjs-print-root').forEach((el) => el.remove())
 
-  const stylesheets: (string | Record<string, string>)[] = []
-  if (stylesheetHref) stylesheets.push(stylesheetHref)
-  stylesheets.push({ 'pagedjs-print.css': PAGE_CSS })
+    // The app's own compiled stylesheet -- needed so the cloned invoice markup keeps its Tailwind
+    // classes' actual styling once it's re-parsed into Paged.js's separate rendering pipeline.
+    const stylesheetHref = [...document.styleSheets]
+      .map((s) => s.href)
+      .find((href): href is string => !!href && href.includes('/assets/'))
 
-  const previewer = new Previewer()
-  // outerHTML, not the live node -- Paged.js's ContentParser takes ownership of whatever DOM node
-  // it's handed (moving it into its own flow), so passing the real element would rip the invoice
-  // out of the page behind the scenes. A markup string is parsed into a fresh, disposable tree.
-  await previewer.preview(sourceEl.outerHTML, stylesheets, container)
+    const container = document.createElement('div')
+    container.id = 'pagedjs-print-root'
+    document.body.appendChild(container)
 
-  document.body.classList.add('pagedjs-printing')
+    const stylesheets: (string | Record<string, string>)[] = []
+    if (stylesheetHref) stylesheets.push(stylesheetHref)
+    stylesheets.push({ 'pagedjs-print.css': PAGE_CSS })
 
-  function cleanup() {
-    document.body.classList.remove('pagedjs-printing')
-    container.remove()
-    window.removeEventListener('afterprint', cleanup)
+    const previewer = new Previewer()
+    // outerHTML, not the live node -- Paged.js's ContentParser takes ownership of whatever DOM
+    // node it's handed (moving it into its own flow), so passing the real element would rip the
+    // invoice out of the page behind the scenes. A markup string is parsed into a fresh,
+    // disposable tree.
+    await previewer.preview(sourceEl.outerHTML, stylesheets, container)
+
+    document.body.classList.add('pagedjs-printing')
+
+    function cleanup() {
+      document.body.classList.remove('pagedjs-printing')
+      container.remove()
+      window.removeEventListener('afterprint', cleanup)
+      printInProgress = false
+    }
+    window.addEventListener('afterprint', cleanup)
+
+    window.print()
+  } catch (err) {
+    printInProgress = false
+    throw err
   }
-  window.addEventListener('afterprint', cleanup)
-
-  window.print()
 }
