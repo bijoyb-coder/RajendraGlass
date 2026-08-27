@@ -337,8 +337,10 @@ export default function PurchaseInvoiceViewPage() {
       <div ref={printRef} className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 print:shadow-none print:border-0">
         {/* Repeated at the top of every printed page (see pagedjs-print.css in pagedPrint.ts) when
             the invoice runs past one page -- printed once, normally, here on the first page. */}
-        <div className="pagedjs-print-header">
-          <div className="flex items-start justify-between border-b-2 border-brand-800 pb-4 mb-4">
+        <div>
+          {/* pagedPrint.ts clones just this row out at print time to build the compact running
+              header repeated on page 2+ -- the marker class has no CSS of its own. */}
+          <div className="pagedjs-header-brand-row flex items-start justify-between border-b-2 border-brand-800 pb-4 mb-4">
             <Logo variant="dark" size="md" showTagline />
             <div className="text-right">
               <h2 className="text-lg font-bold text-brand-900">PURCHASE INVOICE</h2>
