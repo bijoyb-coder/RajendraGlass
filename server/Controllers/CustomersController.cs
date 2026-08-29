@@ -69,12 +69,8 @@ public class CustomersController(IDbConnectionFactory db) : ControllerBase
         {
             return Conflict(new ProblemResponse { Title = "Duplicate code", Status = 409, ErrorCode = "DUPLICATE_CODE", Detail = $"A customer with code '{dto.Code}' already exists." });
         }
-        var existing = conn.QueryFirstOrDefault<int?>(
-            "SELECT CustomerId FROM Master.Customer WHERE Gstin = @Gstin AND @Gstin IS NOT NULL", new { dto.Gstin });
-        if (existing.HasValue)
-        {
-            return Conflict(new ProblemResponse { Title = "Duplicate party", Status = 409, ErrorCode = "DUPLICATE_PARTY", Detail = $"A customer with this GSTIN already exists (id {existing})." });
-        }
+        // GSTIN is no longer validated or checked for uniqueness here -- it's recorded as entered,
+        // duplicates across customers are allowed.
 
         try
         {
@@ -102,12 +98,8 @@ public class CustomersController(IDbConnectionFactory db) : ControllerBase
             return UnprocessableEntity(new ProblemResponse { Title = "Phone number required", Status = 422, ErrorCode = "PHONE_REQUIRED", Detail = "A phone number is mandatory for every customer." });
 
         using var conn = db.CreateConnection();
-        var existing = conn.QueryFirstOrDefault<int?>(
-            "SELECT CustomerId FROM Master.Customer WHERE Gstin = @Gstin AND @Gstin IS NOT NULL AND CustomerId <> @id", new { dto.Gstin, id });
-        if (existing.HasValue)
-        {
-            return Conflict(new ProblemResponse { Title = "Duplicate party", Status = 409, ErrorCode = "DUPLICATE_PARTY", Detail = $"A customer with this GSTIN already exists (id {existing})." });
-        }
+        // GSTIN is no longer validated or checked for uniqueness here -- it's recorded as entered,
+        // duplicates across customers are allowed.
 
         try
         {
