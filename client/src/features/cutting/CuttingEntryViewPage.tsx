@@ -1,7 +1,10 @@
+import { useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Ban, Printer } from 'lucide-react'
-import { useGetCuttingEntryQuery, useDeleteCuttingEntryMutation } from './cuttingEntryApi'
+import { ArrowLeft, Ban, Printer, ImagePlus, X } from 'lucide-react'
+import { useGetCuttingEntryQuery, useDeleteCuttingEntryMutation, useUploadCuttingEntryDesignMutation, useDeleteCuttingEntryDesignMutation } from './cuttingEntryApi'
 import { confirmAction, alertError, alertSuccess } from '../../lib/alerts'
+import { validateDesignFile } from '../../lib/designUpload'
+import ImageLightbox from '../../components/ImageLightbox'
 
 function money(n: number) {
   return new Intl.NumberFormat('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
@@ -15,6 +18,33 @@ export default function CuttingEntryViewPage() {
   const navigate = useNavigate()
   const { data: c, isLoading } = useGetCuttingEntryQuery(Number(id))
   const [cancelEntry, { isLoading: cancelling }] = useDeleteCuttingEntryMutation()
+  const [uploadDesign, { isLoading: uploadingDesign }] = useUploadCuttingEntryDesignMutation()
+  const [deleteDesign] = useDeleteCuttingEntryDesignMutation()
+  const designInputRef = useRef<HTMLInputElement>(null)
+
+  function onDesignFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = ''
+    if (!file || !c) return
+    const problem = validateDesignFile(file)
+    if (problem) { void alertError('Invalid Design File', problem); return }
+    uploadDesign({ id: c.cuttingEntryId, file })
+      .unwrap()
+      .then(() => alertSuccess('Design Uploaded', 'The design image has been attached to this cutting entry.'))
+      .catch((err: any) => alertError('Upload Failed', err?.data?.detail ?? 'Could not upload the design image. Please try again.'))
+  }
+
+  async function handleRemoveDesign() {
+    if (!c) return
+    const ok = await confirmAction('Remove this design image?', 'You can upload a new one afterwards.', 'Yes, remove', 'No')
+    if (!ok) return
+    try {
+      await deleteDesign(c.cuttingEntryId).unwrap()
+      await alertSuccess('Design Removed')
+    } catch (err: any) {
+      void alertError('Could Not Remove', err?.data?.detail ?? 'Please try again.')
+    }
+  }
 
   async function handleCancel() {
     if (!c) return
@@ -77,6 +107,36 @@ export default function CuttingEntryViewPage() {
           <Detail label="Cutting Date" value={new Date(c.cuttingDate).toLocaleDateString('en-IN')} />
           <Detail label="Quotation" value={c.quotationNo ?? '—'} />
           <Detail label="Customer" value={c.customerName ?? '—'} />
+        </div>
+
+        <div className="mb-6">
+          <p className="text-xs font-semibold text-slate-400 uppercase mb-2">Design</p>
+          {c.designDataUrl ? (
+            <div className="flex items-start gap-4">
+              <ImageLightbox src={c.designDataUrl} alt={c.designFileName ?? 'Design'} thumbnailClassName="h-32 w-32 object-cover rounded-lg border border-slate-200 cursor-zoom-in" />
+              <div className="no-print text-xs text-slate-500 space-y-2">
+                <p>Click the image to view it full size.</p>
+                <div className="flex gap-3">
+                  <button type="button" onClick={() => designInputRef.current?.click()} disabled={uploadingDesign} className="inline-flex items-center gap-1 text-brand-600 hover:text-brand-700 font-medium disabled:opacity-60">
+                    <ImagePlus size={13} /> Replace
+                  </button>
+                  <button type="button" onClick={handleRemoveDesign} className="inline-flex items-center gap-1 text-red-600 hover:text-red-700 font-medium">
+                    <X size={13} /> Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => designInputRef.current?.click()}
+              disabled={uploadingDesign}
+              className="no-print inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:text-brand-700 border border-dashed border-slate-300 rounded-lg px-4 py-2.5 disabled:opacity-60"
+            >
+              <ImagePlus size={16} /> {uploadingDesign ? 'Uploading…' : 'Upload Design (JPEG, PNG or GIF)'}
+            </button>
+          )}
+          <input ref={designInputRef} type="file" accept="image/jpeg,image/png,image/gif" onChange={onDesignFileChange} className="hidden" />
         </div>
 
         <div className="overflow-x-auto">

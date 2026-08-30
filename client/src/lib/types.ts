@@ -762,6 +762,10 @@ export interface CuttingEntryDto {
   quotationId: number; quotationNo?: string | null; customerName?: string | null
   totalPcs: number; totalSqft: number; totalGlassValue: number; vanFair: number; totalBillAmount: number
   status: string; createdOn: string
+  /** Cheap flag included on every list row; the image itself (designDataUrl) is only populated on Get(id). */
+  hasDesign: boolean
+  designDataUrl?: string | null
+  designFileName?: string | null
   lines: CuttingEntryLineDto[]
 }
 

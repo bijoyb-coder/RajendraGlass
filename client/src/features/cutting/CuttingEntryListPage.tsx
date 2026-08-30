@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Plus, Ruler, Printer } from 'lucide-react'
+import { Plus, Ruler, Printer, ImageIcon } from 'lucide-react'
 import { useListCuttingEntriesQuery } from './cuttingEntryApi'
 import { useDataGrid, SortIcon, SortableTh, Th, DataGridSearchBar, DataGridPagination, DATA_GRID_HEAD_ROW_CLASS, DATA_GRID_ROW_CLASS, ActionTh } from '../../components/DataGrid'
 import type { CuttingEntryDto } from '../../lib/types'
@@ -92,7 +92,12 @@ export default function CuttingEntryListPage() {
               )}
               {rows.map((c) => (
                 <tr key={c.cuttingEntryId} className={DATA_GRID_ROW_CLASS}>
-                  <td className="px-5 py-3 font-medium text-brand-700">{c.cuttingNo}</td>
+                  <td className="px-5 py-3 font-medium text-brand-700">
+                    <span className="inline-flex items-center gap-1.5">
+                      {c.cuttingNo}
+                      {c.hasDesign && <ImageIcon size={13} className="text-slate-400" aria-label="Design attached" />}
+                    </span>
+                  </td>
                   <td className="px-5 py-3 text-slate-700">{c.quotationNo ?? '—'}</td>
                   <td className="px-5 py-3 text-slate-600">{c.customerName ?? '—'}</td>
                   <td className="px-5 py-3 text-slate-600">{new Date(c.cuttingDate).toLocaleDateString('en-IN')}</td>
