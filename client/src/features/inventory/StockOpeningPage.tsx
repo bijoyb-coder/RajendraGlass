@@ -1,33 +1,41 @@
 import { useState } from 'react'
-import { Plus, X, Trash2, ArrowLeftRight } from 'lucide-react'
-import { useListTransfersQuery, useCreateTransferMutation, useListGodownsQuery } from './inventoryApi'
+import { Plus, X, Trash2, PackagePlus } from 'lucide-react'
+import { useListStockOpeningsQuery, useCreateStockOpeningMutation, useDeleteStockOpeningMutation, useListGodownsQuery } from './inventoryApi'
 import { useListProductsQuery } from '../masters/mastersApi'
 import {
   useDataGrid,
   SortIcon,
   SortableTh,
+  Th,
   DataGridSearchBar,
   DataGridPagination,
   DATA_GRID_HEAD_ROW_CLASS,
   DATA_GRID_ROW_CLASS,
+  ActionTh,
+  DeleteRowAction,
 } from '../../components/DataGrid'
-import type { StockTransferDto } from '../../lib/types'
+import type { StockOpeningDto } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
 
 interface Line { key: string; productId: number; qty: number }
 
-type SortKey = 'transferNo' | 'transferDate' | 'fromGodownName' | 'toGodownName' | 'status'
+type SortKey = 'openingNo' | 'openingDate' | 'godownName' | 'status'
 
-export default function StockTransfersPage() {
-  const { data, isLoading } = useListTransfersQuery()
+/** Records the opening balance of a product at a godown -- e.g. stock that already physically
+ * exists but predates the system. Unlike Stock Adjustment, which corrects book qty to a counted
+ * actual and can move the balance either way, this always adds the entered quantity, the same way
+ * a Purchase/GRN would. */
+export default function StockOpeningPage() {
+  const { data, isLoading } = useListStockOpeningsQuery()
   const { data: godowns } = useListGodownsQuery()
   const { data: products } = useListProductsQuery()
-  const [createTransfer, { isLoading: saving }] = useCreateTransferMutation()
+  const [createOpening, { isLoading: saving }] = useCreateStockOpeningMutation()
+  const [deleteOpening] = useDeleteStockOpeningMutation()
 
   const [showForm, setShowForm] = useState(false)
-  const [fromGodownId, setFromGodownId] = useState<number | ''>('')
-  const [toGodownId, setToGodownId] = useState<number | ''>('')
+  const [godownId, setGodownId] = useState<number | ''>('')
+  const [remarks, setRemarks] = useState('')
   const [lines, setLines] = useState<Line[]>([{ key: crypto.randomUUID(), productId: 0, qty: 0 }])
   const [error, setError] = useState<string | null>(null)
 
@@ -46,21 +54,20 @@ export default function StockTransfersPage() {
     totalCount,
     startIndex,
     endIndex,
-  } = useDataGrid<StockTransferDto, SortKey>(data?.items, {
-    defaultSortKey: 'transferDate',
+  } = useDataGrid<StockOpeningDto, SortKey>(data?.items, {
+    defaultSortKey: 'openingDate',
     defaultSortDir: 'desc',
     comparators: {
-      transferNo: (a, b) => (a.transferNo ?? '').localeCompare(b.transferNo ?? ''),
-      transferDate: (a, b) => new Date(a.transferDate).getTime() - new Date(b.transferDate).getTime(),
-      fromGodownName: (a, b) => (a.fromGodownName ?? '').localeCompare(b.fromGodownName ?? ''),
-      toGodownName: (a, b) => (a.toGodownName ?? '').localeCompare(b.toGodownName ?? ''),
+      openingNo: (a, b) => (a.openingNo ?? '').localeCompare(b.openingNo ?? ''),
+      openingDate: (a, b) => new Date(a.openingDate).getTime() - new Date(b.openingDate).getTime(),
+      godownName: (a, b) => (a.godownName ?? '').localeCompare(b.godownName ?? ''),
       status: (a, b) => a.status.localeCompare(b.status),
     },
-    matches: (t, term) =>
-      !!t.transferNo?.toLowerCase().includes(term) ||
-      !!t.fromGodownName?.toLowerCase().includes(term) ||
-      !!t.toGodownName?.toLowerCase().includes(term) ||
-      t.status.toLowerCase().includes(term),
+    matches: (o, term) =>
+      !!o.openingNo?.toLowerCase().includes(term) ||
+      !!o.godownName?.toLowerCase().includes(term) ||
+      !!o.remarks?.toLowerCase().includes(term) ||
+      o.status.toLowerCase().includes(term),
   })
 
   function addLine() { setLines((p) => [...p, { key: crypto.randomUUID(), productId: 0, qty: 0 }]) }
@@ -70,16 +77,16 @@ export default function StockTransfersPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    if (!fromGodownId || !toGodownId) { setError('Select both godowns.'); return }
-    if (fromGodownId === toGodownId) { setError('Source and destination godown must differ.'); return }
+    if (!godownId) { setError('Select a godown.'); return }
     const valid = lines.filter((l) => l.productId && l.qty > 0)
-    if (valid.length === 0) { setError('Add at least one product with a quantity.'); return }
+    if (valid.length === 0) { setError('Add at least one product with an opening quantity greater than zero.'); return }
     try {
-      await createTransfer({ fromGodownId: Number(fromGodownId), toGodownId: Number(toGodownId), lines: valid.map(({ productId, qty }) => ({ productId, qty })) }).unwrap()
+      await createOpening({ godownId: Number(godownId), remarks: remarks || undefined, lines: valid.map(({ productId, qty }) => ({ productId, qty })) }).unwrap()
       setShowForm(false)
       setLines([{ key: crypto.randomUUID(), productId: 0, qty: 0 }])
+      setRemarks('')
     } catch (err: any) {
-      setError(err?.data?.detail ?? 'Could not save the transfer.')
+      setError(err?.data?.detail ?? 'Could not save the opening balance.')
     }
   }
 
@@ -87,11 +94,11 @@ export default function StockTransfersPage() {
     <div className="space-y-5 animate-fade-in">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-brand-900">Godown Stock Shifting</h1>
-          <p className="text-sm text-slate-500 mt-1">Move stock between godowns.</p>
+          <h1 className="text-2xl font-bold text-brand-900">Stock Opening</h1>
+          <p className="text-sm text-slate-500 mt-1">Record the opening balance of an item at a godown.</p>
         </div>
         <button onClick={() => setShowForm((v) => !v)} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
-          {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? 'Cancel' : 'New Transfer'}
+          {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? 'Cancel' : 'New Opening Balance'}
         </button>
       </div>
 
@@ -99,18 +106,15 @@ export default function StockTransfersPage() {
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4 animate-fade-in">
           <div className="grid sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">From Godown *</label>
-              <select required value={fromGodownId} onChange={(e) => setFromGodownId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
-                <option value="">Select…</option>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Godown *</label>
+              <select required value={godownId} onChange={(e) => setGodownId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
+                <option value="">Select godown…</option>
                 {godowns?.items.map((g) => <option key={g.godownId} value={g.godownId}>{g.name}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">To Godown *</label>
-              <select required value={toGodownId} onChange={(e) => setToGodownId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
-                <option value="">Select…</option>
-                {godowns?.items.map((g) => <option key={g.godownId} value={g.godownId}>{g.name}</option>)}
-              </select>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Remarks</label>
+              <input value={remarks} onChange={(e) => setRemarks(e.target.value)} className={inputClass} placeholder="Migrated from paper records, etc." />
             </div>
           </div>
 
@@ -118,7 +122,7 @@ export default function StockTransfersPage() {
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-100">
                 <th className="py-2 font-medium">Product</th>
-                <th className="py-2 font-medium w-40">Quantity</th>
+                <th className="py-2 font-medium w-40">Opening Qty</th>
                 <th className="w-10" />
               </tr>
             </thead>
@@ -134,7 +138,9 @@ export default function StockTransfersPage() {
                   <td className="py-2 pr-2">
                     <input type="number" min={0} step="0.001" value={l.qty || ''} onChange={(e) => updateLine(l.key, { qty: Number(e.target.value) })} className={inputClass} />
                   </td>
-                  <td><button type="button" onClick={() => removeLine(l.key)} className="text-slate-400 hover:text-red-500 transition"><Trash2 size={15} /></button></td>
+                  <td>
+                    <button type="button" onClick={() => removeLine(l.key)} className="text-slate-400 hover:text-red-500 transition"><Trash2 size={15} /></button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -144,7 +150,7 @@ export default function StockTransfersPage() {
           {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5">{error}</div>}
           <div className="flex justify-end">
             <button type="submit" disabled={saving} className="bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">
-              {saving ? 'Saving…' : 'Transfer Stock'}
+              {saving ? 'Saving…' : 'Post Opening Balance'}
             </button>
           </div>
         </form>
@@ -154,7 +160,7 @@ export default function StockTransfersPage() {
         <DataGridSearchBar
           value={search}
           onChange={setSearch}
-          placeholder="Search transfer no., godown or status…"
+          placeholder="Search opening no., godown, remarks or status…"
           pageSize={pageSize}
           onPageSizeChange={setPageSize}
         />
@@ -162,40 +168,46 @@ export default function StockTransfersPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className={DATA_GRID_HEAD_ROW_CLASS}>
-                <SortableTh onClick={() => toggleSort('transferNo')}>
-                  Transfer No. <SortIcon column="transferNo" sortKey={sortKey} sortDir={sortDir} />
+                <SortableTh onClick={() => toggleSort('openingNo')}>
+                  Opening No. <SortIcon column="openingNo" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
-                <SortableTh onClick={() => toggleSort('transferDate')}>
-                  Date <SortIcon column="transferDate" sortKey={sortKey} sortDir={sortDir} />
+                <SortableTh onClick={() => toggleSort('openingDate')}>
+                  Date <SortIcon column="openingDate" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
-                <SortableTh onClick={() => toggleSort('fromGodownName')}>
-                  From <SortIcon column="fromGodownName" sortKey={sortKey} sortDir={sortDir} />
+                <SortableTh onClick={() => toggleSort('godownName')}>
+                  Godown <SortIcon column="godownName" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
-                <SortableTh onClick={() => toggleSort('toGodownName')}>
-                  To <SortIcon column="toGodownName" sortKey={sortKey} sortDir={sortDir} />
-                </SortableTh>
+                <Th>Remarks</Th>
                 <SortableTh onClick={() => toggleSort('status')}>
                   Status <SortIcon column="status" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
+                <ActionTh />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-5 py-14 text-center text-slate-400">
-                    <ArrowLeftRight size={28} className="mx-auto mb-2 text-slate-300" />
-                    {search ? 'No transfers match your search.' : 'No transfers yet.'}
+                  <td colSpan={6} className="px-5 py-14 text-center text-slate-400">
+                    <PackagePlus size={28} className="mx-auto mb-2 text-slate-300" />
+                    {search ? 'No opening balances match your search.' : 'No opening balances posted yet.'}
                   </td>
                 </tr>
               )}
-              {rows.map((t) => (
-                <tr key={t.stockTransferId} className={DATA_GRID_ROW_CLASS}>
-                  <td className="px-5 py-3 font-medium text-brand-700">{t.transferNo}</td>
-                  <td className="px-5 py-3 text-slate-600">{new Date(t.transferDate).toLocaleDateString('en-IN')}</td>
-                  <td className="px-5 py-3 text-slate-700">{t.fromGodownName}</td>
-                  <td className="px-5 py-3 text-slate-700">{t.toGodownName}</td>
-                  <td className="px-5 py-3"><span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">{t.status}</span></td>
+              {rows.map((o) => (
+                <tr key={o.stockOpeningId} className={DATA_GRID_ROW_CLASS}>
+                  <td className="px-5 py-3 font-medium text-brand-700">{o.openingNo}</td>
+                  <td className="px-5 py-3 text-slate-600">{new Date(o.openingDate).toLocaleDateString('en-IN')}</td>
+                  <td className="px-5 py-3 text-slate-700">{o.godownName}</td>
+                  <td className="px-5 py-3 text-slate-500">{o.remarks ?? '—'}</td>
+                  <td className="px-5 py-3"><span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">{o.status}</span></td>
+                  <td className="px-5 py-3 text-right">
+                    <DeleteRowAction
+                      canDelete={o.canDelete}
+                      itemLabel={`Stock Opening ${o.openingNo}`}
+                      onDelete={() => deleteOpening(o.stockOpeningId).unwrap()}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>

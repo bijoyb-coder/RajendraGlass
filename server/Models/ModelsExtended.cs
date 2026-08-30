@@ -178,6 +178,42 @@ public class CreateStockAdjustmentRequest
     public List<CreateStockAdjustmentLineRequest> Lines { get; set; } = new();
 }
 
+public class StockOpeningLineDto
+{
+    public int ProductId { get; set; }
+    public string? ProductCode { get; set; }
+    public decimal Qty { get; set; }
+}
+
+/// <summary>An inbound-only entry recording the opening balance of a product at a godown -- e.g.
+/// stock that already physically exists but predates the system. See CreateStockOpening for how
+/// it differs from a Stock Adjustment.</summary>
+public class StockOpeningDto
+{
+    public int StockOpeningId { get; set; }
+    public string? OpeningNo { get; set; }
+    public int GodownId { get; set; }
+    public string? GodownName { get; set; }
+    public DateTime OpeningDate { get; set; }
+    public string Status { get; set; } = "Posted";
+    public string? Remarks { get; set; }
+    public List<StockOpeningLineDto> Lines { get; set; } = new();
+    public bool CanDelete { get; set; } = true;
+}
+
+public class CreateStockOpeningLineRequest
+{
+    public int ProductId { get; set; }
+    public decimal Qty { get; set; }
+}
+
+public class CreateStockOpeningRequest
+{
+    public int GodownId { get; set; }
+    public string? Remarks { get; set; }
+    public List<CreateStockOpeningLineRequest> Lines { get; set; } = new();
+}
+
 public class StockTransferLineDto
 {
     public int ProductId { get; set; }

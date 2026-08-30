@@ -3,7 +3,7 @@ import type {
   GodownDto, CreateGodownRequest, UpdateGodownRequest, GodownDetailDto,
   RackDto, CreateRackRequest, UpdateRackRequest,
   RackStockDto, AdjustRackStockRequest, TransferRackStockRequest,
-  StockBalanceDto, StockAdjustmentDto, CreateStockAdjustmentRequest,
+  StockBalanceDto, StockOpeningDto, CreateStockOpeningRequest, StockAdjustmentDto, CreateStockAdjustmentRequest,
   StockTransferDto, CreateStockTransferRequest, OffcutDto, CreateOffcutRequest,
 } from '../../lib/types'
 
@@ -60,6 +60,18 @@ export const inventoryApi = api.injectEndpoints({
       query: (args) => ({ url: '/stock', params: args ?? {} }),
       providesTags: ['Stock'],
     }),
+    listStockOpenings: builder.query<{ items: StockOpeningDto[] }, void>({
+      query: () => '/stock-openings',
+      providesTags: ['StockOpening'],
+    }),
+    createStockOpening: builder.mutation<{ stockOpeningId: number; openingNo: string }, CreateStockOpeningRequest>({
+      query: (body) => ({ url: '/stock-openings', method: 'POST', body }),
+      invalidatesTags: ['StockOpening', 'Stock'],
+    }),
+    deleteStockOpening: builder.mutation<void, number>({
+      query: (id) => ({ url: `/stock-openings/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['StockOpening', 'Stock'],
+    }),
     listAdjustments: builder.query<{ items: StockAdjustmentDto[] }, void>({
       query: () => '/stock-adjustments',
       providesTags: ['StockAdjustment'],
@@ -108,6 +120,9 @@ export const {
   useTransferRackStockMutation,
   useDeleteRackStockMutation,
   useStockEnquiryQuery,
+  useListStockOpeningsQuery,
+  useCreateStockOpeningMutation,
+  useDeleteStockOpeningMutation,
   useListAdjustmentsQuery,
   useCreateAdjustmentMutation,
   useDeleteAdjustmentMutation,

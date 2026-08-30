@@ -29,6 +29,7 @@ import GodownsPage from './features/masters/GodownsPage'
 import SuppliersPage from './features/purchase/SuppliersPage'
 
 import StockPage from './features/inventory/StockPage'
+import StockOpeningPage from './features/inventory/StockOpeningPage'
 import StockAdjustmentsPage from './features/inventory/StockAdjustmentsPage'
 import StockTransfersPage from './features/inventory/StockTransfersPage'
 import OffcutsPage from './features/inventory/OffcutsPage'
@@ -98,6 +99,7 @@ export default function App() {
             <Route path="/masters/suppliers" element={<SuppliersPage />} />
 
             <Route path="/inventory/stock" element={<StockPage />} />
+            <Route path="/inventory/opening" element={<StockOpeningPage />} />
             <Route path="/inventory/adjustments" element={<StockAdjustmentsPage />} />
             <Route path="/inventory/transfers" element={<StockTransfersPage />} />
             <Route path="/inventory/offcuts" element={<OffcutsPage />} />

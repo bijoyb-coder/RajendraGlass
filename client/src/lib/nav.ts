@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   LayoutGrid, Receipt, Truck, FileText, ClipboardList, Zap,
   Building2, Layers, Users, Factory, Warehouse,
-  Boxes, ClipboardEdit, ArrowLeftRight, Puzzle, PackageSearch,
+  Boxes, ClipboardEdit, ArrowLeftRight, Puzzle, PackageSearch, PackagePlus,
   ShoppingCart, PackageCheck, FileStack, ScanLine,
   Scissors, Wrench, LayoutList, Flame, Ruler,
   Wallet, Receipt as ReceiptIcon, Wallet2,
@@ -55,8 +55,9 @@ export const navSections: { title: string; items: NavItem[] }[] = [
     title: 'Inventory',
     items: [
       { label: 'Stock Enquiry', path: '/inventory/stock', icon: Boxes, implemented: true, perm: 'Stock.View' },
+      { label: 'Stock Opening', path: '/inventory/opening', icon: PackagePlus, implemented: true, perm: 'Stock.View' },
       { label: 'Stock Adjustments', path: '/inventory/adjustments', icon: ClipboardEdit, implemented: true, perm: 'Stock.View' },
-      { label: 'Stock Transfers', path: '/inventory/transfers', icon: ArrowLeftRight, implemented: true, perm: 'Stock.View' },
+      { label: 'Godown Stock Shifting', path: '/inventory/transfers', icon: ArrowLeftRight, implemented: true, perm: 'Stock.View' },
       { label: 'Offcuts', path: '/inventory/offcuts', icon: Puzzle, implemented: true, perm: 'Offcut.View' },
       { label: 'Rack Stock', path: '/inventory/rack-stock', icon: PackageSearch, implemented: true, perm: 'Stock.View' },
     ],
