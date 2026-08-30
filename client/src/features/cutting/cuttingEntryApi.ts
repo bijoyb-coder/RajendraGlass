@@ -24,6 +24,22 @@ export const cuttingEntryApi = api.injectEndpoints({
       query: (id) => ({ url: `/cutting-entries/${id}`, method: 'DELETE' }),
       invalidatesTags: ['CuttingEntry', 'Stock'],
     }),
+    /** `file` is sent as-is inside a FormData body -- fetchBaseQuery passes FormData through
+     * untouched (no JSON.stringify, no Content-Type override), so the browser sets the correct
+     * multipart boundary itself. Server re-validates the file's real bytes regardless of what this
+     * File object's `.type` claims. */
+    uploadCuttingEntryDesign: builder.mutation<void, { id: number; file: File }>({
+      query: ({ id, file }) => {
+        const body = new FormData()
+        body.append('file', file)
+        return { url: `/cutting-entries/${id}/design`, method: 'POST', body }
+      },
+      invalidatesTags: (_result, _error, { id }) => [{ type: 'CuttingEntry', id }],
+    }),
+    deleteCuttingEntryDesign: builder.mutation<void, number>({
+      query: (id) => ({ url: `/cutting-entries/${id}/design`, method: 'DELETE' }),
+      invalidatesTags: (_result, _error, id) => [{ type: 'CuttingEntry', id }],
+    }),
   }),
 })
 
@@ -32,4 +48,6 @@ export const {
   useGetCuttingEntryQuery,
   useCreateCuttingEntryMutation,
   useDeleteCuttingEntryMutation,
+  useUploadCuttingEntryDesignMutation,
+  useDeleteCuttingEntryDesignMutation,
 } = cuttingEntryApi

@@ -21,6 +21,17 @@ public class CuttingEntryController(IDbConnectionFactory db) : ControllerBase
 {
     private const string DocType = "CuttingEntry";
 
+    /// <summary>Only these three raster formats are accepted for a Design upload, checked against
+    /// both the browser-reported content type and the file's own magic-number header (a client can
+    /// always lie about ContentType/extension, so the bytes themselves are the real check).</summary>
+    private static readonly Dictionary<string, Func<byte[], bool>> AllowedDesignTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["image/jpeg"] = b => b.Length >= 3 && b[0] == 0xFF && b[1] == 0xD8 && b[2] == 0xFF,
+        ["image/png"] = b => b.Length >= 8 && b[0] == 0x89 && b[1] == 0x50 && b[2] == 0x4E && b[3] == 0x47 && b[4] == 0x0D && b[5] == 0x0A && b[6] == 0x1A && b[7] == 0x0A,
+        ["image/gif"] = b => b.Length >= 6 && b[0] == 'G' && b[1] == 'I' && b[2] == 'F' && b[3] == '8' && (b[4] == '7' || b[4] == '9') && b[5] == 'a',
+    };
+    private const long MaxDesignFileBytes = 5 * 1024 * 1024; // 5 MB
+
     private static readonly string LineSelect = @"
         SELECT l.CuttingEntryLineId, l.SerialNo, l.QuotationLineId, l.ProductId,
                p.Code AS ProductCode, p.Description AS ProductDescription,
@@ -41,7 +52,8 @@ public class CuttingEntryController(IDbConnectionFactory db) : ControllerBase
         using var conn = db.CreateConnection();
         var rows = conn.Query<CuttingEntryDto>(
             @"SELECT ce.CuttingEntryId, ce.CuttingNo, ce.CuttingDate, ce.QuotationId, q.QuotationNo, c.Name AS CustomerName,
-                     ce.TotalPcs, ce.TotalSqft, ce.TotalGlassValue, ce.VanFair, ce.TotalBillAmount, ce.Status, ce.CreatedOn
+                     ce.TotalPcs, ce.TotalSqft, ce.TotalGlassValue, ce.VanFair, ce.TotalBillAmount, ce.Status, ce.CreatedOn,
+                     CAST(CASE WHEN ce.DesignData IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS HasDesign
               FROM Cutting.CuttingEntry ce
               JOIN Sales.Quotation q ON q.QuotationId = ce.QuotationId
               JOIN Master.Customer c ON c.CustomerId = q.CustomerId
@@ -56,13 +68,22 @@ public class CuttingEntryController(IDbConnectionFactory db) : ControllerBase
         using var conn = db.CreateConnection();
         var entry = conn.QueryFirstOrDefault<CuttingEntryDto>(
             @"SELECT ce.CuttingEntryId, ce.CuttingNo, ce.CuttingDate, ce.QuotationId, q.QuotationNo, c.Name AS CustomerName,
-                     ce.TotalPcs, ce.TotalSqft, ce.TotalGlassValue, ce.VanFair, ce.TotalBillAmount, ce.Status, ce.CreatedOn
+                     ce.TotalPcs, ce.TotalSqft, ce.TotalGlassValue, ce.VanFair, ce.TotalBillAmount, ce.Status, ce.CreatedOn,
+                     CAST(CASE WHEN ce.DesignData IS NOT NULL THEN 1 ELSE 0 END AS BIT) AS HasDesign,
+                     ce.DesignFileName
               FROM Cutting.CuttingEntry ce
               JOIN Sales.Quotation q ON q.QuotationId = ce.QuotationId
               JOIN Master.Customer c ON c.CustomerId = q.CustomerId
               WHERE ce.CuttingEntryId = @id", new { id });
         if (entry is null) return NotFound();
         entry.Lines = conn.Query<CuttingEntryLineDto>(LineSelect, new { id }).ToList();
+
+        if (entry.HasDesign)
+        {
+            var design = conn.QueryFirstOrDefault<(byte[] DesignData, string? DesignContentType)>(
+                "SELECT DesignData, DesignContentType FROM Cutting.CuttingEntry WHERE CuttingEntryId = @id", new { id });
+            entry.DesignDataUrl = $"data:{design.DesignContentType ?? "application/octet-stream"};base64,{Convert.ToBase64String(design.DesignData)}";
+        }
         return Ok(entry);
     }
 
@@ -227,6 +248,52 @@ public class CuttingEntryController(IDbConnectionFactory db) : ControllerBase
             tx.Rollback();
             throw;
         }
+    }
+
+    /// <summary>Attaches (or replaces) the Design image for an already-saved cutting entry -- a
+    /// reference photo/drawing, not part of the atomic stock transaction, so it's a simple auxiliary
+    /// step rather than something the Create transaction needs to know about. Only JPEG/PNG/GIF are
+    /// accepted, checked by magic-number sniff (never trusting the client's declared ContentType or
+    /// file extension), capped at 5&#160;MB.</summary>
+    [RequirePermission("CuttingEntry.Create")]
+    [HttpPost("{id:int}/design")]
+    [RequestSizeLimit(MaxDesignFileBytes + 4096)]
+    public async Task<IActionResult> UploadDesign(int id, IFormFile? file)
+    {
+        if (file is null || file.Length == 0)
+            return UnprocessableEntity(new ProblemResponse { Title = "No file selected", Status = 422, ErrorCode = "FILE_REQUIRED", Detail = "Choose an image to upload." });
+        if (file.Length > MaxDesignFileBytes)
+            return UnprocessableEntity(new ProblemResponse { Title = "File too large", Status = 422, ErrorCode = "FILE_TOO_LARGE", Detail = "The design image must be 5 MB or smaller." });
+
+        using var ms = new MemoryStream();
+        await file.CopyToAsync(ms);
+        var bytes = ms.ToArray();
+
+        var matchedType = AllowedDesignTypes.FirstOrDefault(kv => kv.Value(bytes)).Key;
+        if (matchedType is null)
+            return UnprocessableEntity(new ProblemResponse { Title = "Invalid file type", Status = 422, ErrorCode = "INVALID_FILE_TYPE", Detail = "Only JPEG, PNG or GIF images are allowed for the Design upload." });
+
+        using var conn = db.CreateConnection();
+        var rows = conn.Execute(
+            "UPDATE Cutting.CuttingEntry SET DesignFileName = @FileName, DesignContentType = @ContentType, DesignData = @Data WHERE CuttingEntryId = @id",
+            new { id, FileName = file.FileName, ContentType = matchedType, Data = bytes });
+        if (rows == 0) return NotFound();
+
+        conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('UploadDesign', 'CuttingEntry', @id)", new { id = id.ToString() });
+        return NoContent();
+    }
+
+    [RequirePermission("CuttingEntry.Create")]
+    [HttpDelete("{id:int}/design")]
+    public IActionResult DeleteDesign(int id)
+    {
+        using var conn = db.CreateConnection();
+        var rows = conn.Execute(
+            "UPDATE Cutting.CuttingEntry SET DesignFileName = NULL, DesignContentType = NULL, DesignData = NULL WHERE CuttingEntryId = @id",
+            new { id });
+        if (rows == 0) return NotFound();
+        conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('RemoveDesign', 'CuttingEntry', @id)", new { id = id.ToString() });
+        return NoContent();
     }
 
     /// <summary>Cancel, not a hard delete -- Cutting Entry, like every other stock-affecting

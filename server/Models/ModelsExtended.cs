@@ -1214,6 +1214,14 @@ public class CuttingEntryDto
     public decimal TotalBillAmount { get; set; }
     public string Status { get; set; } = "Booked";
     public DateTime CreatedOn { get; set; }
+    /// <summary>Cheap to include in the list view (no bytes moved) -- lets the list show a badge
+    /// without loading the image itself.</summary>
+    public bool HasDesign { get; set; }
+    /// <summary>Populated only on Get(id), never List() -- a data: URL ("data:image/jpeg;base64,...")
+    /// built server-side from DesignData, so the client can just drop it straight into an &lt;img&gt;
+    /// src with no separate authenticated-download endpoint to build.</summary>
+    public string? DesignDataUrl { get; set; }
+    public string? DesignFileName { get; set; }
     public List<CuttingEntryLineDto> Lines { get; set; } = new();
 }
 

@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus, Trash2, Save } from 'lucide-react'
+import { Plus, Trash2, Save, ImagePlus, X } from 'lucide-react'
 import { useListQuotationsQuery, useLazyGetQuotationCuttingProductsQuery } from '../sales/salesExtraApi'
 import { useListGodownsQuery, useListRacksQuery, useListRackStockQuery } from '../inventory/inventoryApi'
-import { useCreateCuttingEntryMutation } from './cuttingEntryApi'
+import { useCreateCuttingEntryMutation, useUploadCuttingEntryDesignMutation } from './cuttingEntryApi'
 import SearchableSelect from '../../components/SearchableSelect'
 import { parseGlassDimension } from '../../lib/glassDimension'
-import { alertError, alertSuccess } from '../../lib/alerts'
+import { alertError, alertSuccess, alertWarning } from '../../lib/alerts'
+import { validateDesignFile } from '../../lib/designUpload'
 import type { QuotationCuttingProductDto } from '../../lib/types'
 
 interface LineRow {
@@ -53,13 +54,16 @@ export default function CuttingEntryCreatePage() {
   const { data: allRackStock } = useListRackStockQuery()
   const [fetchCuttingProducts] = useLazyGetQuotationCuttingProductsQuery()
   const [createCuttingEntry, { isLoading }] = useCreateCuttingEntryMutation()
+  const [uploadDesign] = useUploadCuttingEntryDesignMutation()
 
   const [quotationId, setQuotationId] = useState<number | ''>('')
   const [cuttingDate, setCuttingDate] = useState(() => new Date().toISOString().slice(0, 10))
   const [vanFair, setVanFair] = useState<number | ''>(0)
   const [products, setProducts] = useState<QuotationCuttingProductDto[]>([])
   const [lines, setLines] = useState<LineRow[]>([emptyLine()])
-  const [error, setError] = useState<string | null>(null)
+  const [designFile, setDesignFile] = useState<File | null>(null)
+  const [designPreviewUrl, setDesignPreviewUrl] = useState<string | null>(null)
+  const designInputRef = useRef<HTMLInputElement>(null)
 
   async function selectQuotation(id: number | '') {
     setQuotationId(id)
@@ -70,7 +74,7 @@ export default function CuttingEntryCreatePage() {
       setProducts(result.items)
     } catch {
       setProducts([])
-      setError('Could not load this quotation\'s products. Please try again.')
+      void alertError('Could Not Load Products', "This quotation's products could not be loaded. Please try again.")
     }
   }
 
@@ -82,6 +86,9 @@ export default function CuttingEntryCreatePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // Revoke the preview's object URL on unmount / whenever it's replaced, so the browser can free it.
+  useEffect(() => () => { if (designPreviewUrl) URL.revokeObjectURL(designPreviewUrl) }, [designPreviewUrl])
+
   function addLine() { setLines((prev) => [...prev, emptyLine()]) }
   function removeLine(key: string) { setLines((prev) => prev.filter((l) => l.key !== key)) }
   function updateLine(key: string, patch: Partial<LineRow>) { setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l))) }
@@ -89,6 +96,23 @@ export default function CuttingEntryCreatePage() {
   function onProductChange(key: string, quotationLineId: number) {
     // A new product means any Godown/Rack picked for the old one no longer applies.
     updateLine(key, { quotationLineId, godownId: '', rackId: '' })
+  }
+
+  function onDesignFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // let the same file be re-selected later (e.g. after removing it)
+    if (!file) return
+    const problem = validateDesignFile(file)
+    if (problem) { void alertError('Invalid Design File', problem); return }
+    if (designPreviewUrl) URL.revokeObjectURL(designPreviewUrl)
+    setDesignFile(file)
+    setDesignPreviewUrl(URL.createObjectURL(file))
+  }
+
+  function removeDesignFile() {
+    if (designPreviewUrl) URL.revokeObjectURL(designPreviewUrl)
+    setDesignFile(null)
+    setDesignPreviewUrl(null)
   }
 
   const productByLineId = useMemo(() => new Map(products.map((p) => [p.quotationLineId, p])), [products])
@@ -110,27 +134,26 @@ export default function CuttingEntryCreatePage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
 
-    if (!quotationId) { setError('Please select a Quotation.'); return }
-    if (!cuttingDate) { setError('Please enter the Cutting Date.'); return }
-    if (Number(vanFair) < 0) { setError('Van Fair cannot be negative.'); return }
-    if (lines.length === 0) { setError('Add at least one cutting row.'); return }
+    if (!quotationId) { void alertError('Validation Error', 'Please select a Quotation.'); return }
+    if (!cuttingDate) { void alertError('Validation Error', 'Please enter the Cutting Date.'); return }
+    if (Number(vanFair) < 0) { void alertError('Validation Error', 'Van Fair cannot be negative.'); return }
+    if (lines.length === 0) { void alertError('Validation Error', 'Add at least one cutting row.'); return }
 
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i]
       const where = `Row ${i + 1}`
-      if (!l.quotationLineId) { setError(`${where}: select a product.`); return }
+      if (!l.quotationLineId) { void alertError('Validation Error', `${where}: select a product.`); return }
       const actualH = parseGlassDimension(l.actualHeightText)
       if (actualH === null) { void alertError('Invalid Height', `${where}: please enter a valid glass height, e.g. 20¼, 20 1/4 or 20.25.`); return }
       const actualW = parseGlassDimension(l.actualWidthText)
       if (actualW === null) { void alertError('Invalid Width', `${where}: please enter a valid glass width, e.g. 20¼, 20 1/4 or 20.25.`); return }
-      if (!l.pcs || Number(l.pcs) <= 0 || !Number.isInteger(Number(l.pcs))) { setError(`${where}: PCS must be a whole number greater than zero.`); return }
-      if (!l.chargeableHeight || Number(l.chargeableHeight) <= 0) { setError(`${where}: Chargeable Height is required.`); return }
-      if (!l.chargeableWidth || Number(l.chargeableWidth) <= 0) { setError(`${where}: Chargeable Width is required.`); return }
-      if (Number(l.chargeableHeight) < actualH) { setError(`${where}: Chargeable Height cannot be less than the actual height.`); return }
-      if (Number(l.chargeableWidth) < actualW) { setError(`${where}: Chargeable Width cannot be less than the actual width.`); return }
-      if (!l.godownId) { setError(`${where}: select a Godown.`); return }
+      if (!l.pcs || Number(l.pcs) <= 0 || !Number.isInteger(Number(l.pcs))) { void alertError('Validation Error', `${where}: PCS must be a whole number greater than zero.`); return }
+      if (!l.chargeableHeight || Number(l.chargeableHeight) <= 0) { void alertError('Validation Error', `${where}: Chargeable Height is required.`); return }
+      if (!l.chargeableWidth || Number(l.chargeableWidth) <= 0) { void alertError('Validation Error', `${where}: Chargeable Width is required.`); return }
+      if (Number(l.chargeableHeight) < actualH) { void alertError('Validation Error', `${where}: Chargeable Height cannot be less than the actual height.`); return }
+      if (Number(l.chargeableWidth) < actualW) { void alertError('Validation Error', `${where}: Chargeable Width cannot be less than the actual width.`); return }
+      if (!l.godownId) { void alertError('Validation Error', `${where}: select a Godown.`); return }
     }
 
     try {
@@ -150,6 +173,17 @@ export default function CuttingEntryCreatePage() {
         })),
       }).unwrap()
 
+      // The Design image is attached as a separate step, deliberately outside the atomic stock
+      // transaction -- it's a reference photo, not part of what makes the cutting entry valid, so
+      // a failed upload here shouldn't undo an already-successful save.
+      if (designFile) {
+        try {
+          await uploadDesign({ id: result.cuttingEntryId, file: designFile }).unwrap()
+        } catch (err: any) {
+          void alertWarning('Design Not Attached', err?.data?.detail ?? 'The cutting entry was saved, but the design image could not be uploaded. You can try again from the entry\'s page.')
+        }
+      }
+
       await alertSuccess(
         'Cutting Saved Successfully',
         `Cutting No: ${result.cuttingNo}\nTotal PCS: ${result.totalPcs}\nTotal SQFT: ${result.totalSqft.toFixed(2)}\nTotal Bill Amount: ${money(result.totalBillAmount)}`,
@@ -158,7 +192,7 @@ export default function CuttingEntryCreatePage() {
       navigate(`/sales/cutting/${result.cuttingEntryId}`)
     } catch (err: any) {
       if (err?.data?.errorCode === 'STOCK_INSUFFICIENT') void alertError('Insufficient Stock', err.data.detail)
-      else setError(err?.data?.detail ?? 'Could not save the cutting entry. Please check the details and try again.')
+      else void alertError('Could Not Save', err?.data?.detail ?? 'Could not save the cutting entry. Please check the details and try again.')
     }
   }
 
@@ -189,6 +223,30 @@ export default function CuttingEntryCreatePage() {
                 />
               </Field>
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Design (optional)</label>
+            {!designPreviewUrl ? (
+              <button
+                type="button"
+                onClick={() => designInputRef.current?.click()}
+                className="inline-flex items-center gap-2 text-sm font-medium text-brand-600 hover:text-brand-700 border border-dashed border-slate-300 rounded-lg px-4 py-2.5"
+              >
+                <ImagePlus size={16} /> Upload Design (JPEG, PNG or GIF)
+              </button>
+            ) : (
+              <div className="flex items-center gap-3">
+                <img src={designPreviewUrl} alt="Design preview" className="h-20 w-20 object-cover rounded-lg border border-slate-200" />
+                <div className="text-sm text-slate-600">
+                  <p className="font-medium">{designFile?.name}</p>
+                  <button type="button" onClick={removeDesignFile} className="inline-flex items-center gap-1 text-xs text-red-600 hover:text-red-700 mt-1">
+                    <X size={13} /> Remove
+                  </button>
+                </div>
+              </div>
+            )}
+            <input ref={designInputRef} type="file" accept="image/jpeg,image/png,image/gif" onChange={onDesignFileChange} className="hidden" />
           </div>
         </div>
 
@@ -321,8 +379,6 @@ export default function CuttingEntryCreatePage() {
             </div>
           </div>
         </div>
-
-        {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5">{error}</div>}
 
         <div className="flex justify-end gap-3">
           <button type="submit" disabled={isLoading} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-semibold text-sm px-5 py-2.5 rounded-lg shadow transition disabled:opacity-60">
