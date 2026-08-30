@@ -402,6 +402,136 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         return Ok(new { items = rows, total = rows.Count() });
     }
 
+    // ---------------- Stock Opening ----------------
+    [HttpGet("stock-openings")]
+    public IActionResult ListStockOpenings()
+    {
+        using var conn = db.CreateConnection();
+        var rows = conn.Query<StockOpeningDto>(
+            @"SELECT o.StockOpeningId, o.OpeningNo, o.GodownId, g.Name AS GodownName, o.OpeningDate, o.Status, o.Remarks
+              FROM Inventory.StockOpening o JOIN Company.Godown g ON g.GodownId = o.GodownId
+              ORDER BY o.StockOpeningId DESC");
+        return Ok(new { items = rows });
+    }
+
+    /// <summary>Inbound-only, unlike Stock Adjustment (which sets book qty to a counted actual and
+    /// can move the balance either way) -- Stock Opening always adds the entered quantity, the same
+    /// way a Purchase/GRN increases stock, so it's the right tool for recording pre-existing stock
+    /// a product had before it was tracked in this system.</summary>
+    [RequirePermission("StockOpening.Create")]
+    [HttpPost("stock-openings")]
+    public IActionResult CreateStockOpening([FromBody] CreateStockOpeningRequest req)
+    {
+        if (req.Lines.Count == 0)
+            return UnprocessableEntity(new ProblemResponse { Title = "No lines", Status = 422, ErrorCode = "LINES_REQUIRED", Detail = "Add at least one product with an opening quantity." });
+        var badLine = req.Lines.FirstOrDefault(l => l.Qty <= 0);
+        if (badLine is not null)
+            return UnprocessableEntity(new ProblemResponse { Title = "Invalid quantity", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = "Opening quantity must be greater than zero for every line." });
+
+        using var conn = db.CreateConnection();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            int branchId = DocNumbering.DefaultBranchId(conn, tx);
+            string openingNo = DocNumbering.NextNumber(conn, tx, branchId, "StockOpening");
+
+            var openingId = conn.ExecuteScalar<int>(
+                @"INSERT INTO Inventory.StockOpening (OpeningNo, GodownId, Remarks, Status)
+                  OUTPUT INSERTED.StockOpeningId
+                  VALUES (@openingNo, @GodownId, @Remarks, 'Posted')", new { openingNo, req.GodownId, req.Remarks }, tx);
+
+            foreach (var line in req.Lines)
+            {
+                conn.Execute(
+                    "INSERT INTO Inventory.StockOpeningLine (StockOpeningId, ProductId, Qty) VALUES (@openingId, @ProductId, @Qty)",
+                    new { openingId, line.ProductId, line.Qty }, tx);
+
+                var balance = conn.QueryFirstOrDefault(
+                    "SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { line.ProductId, req.GodownId }, transaction: tx);
+                if (balance is null)
+                    conn.Execute("INSERT INTO Inventory.StockBalance (ProductId, GodownId, QtyOnHand) VALUES (@ProductId, @GodownId, @Qty)",
+                        new { line.ProductId, req.GodownId, line.Qty }, tx);
+                else
+                    conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand + @Qty WHERE StockBalanceId = @id",
+                        new { line.Qty, id = (int)balance.StockBalanceId }, tx);
+
+                conn.Execute(
+                    @"INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty)
+                      VALUES (@ProductId, @GodownId, 'Opening', 'StockOpening', @openingId, @Qty)",
+                    new { line.ProductId, req.GodownId, openingId, line.Qty }, tx);
+            }
+
+            conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'StockOpening', @id)", new { id = openingId.ToString() }, tx);
+            tx.Commit();
+            return Created($"/api/v1/stock-openings/{openingId}", new { stockOpeningId = openingId, openingNo });
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
+    /// <summary>Same "stock already moved on" guard as StockAdjustment.Delete/GrnController.Delete
+    /// -- reverses exactly what this entry added (read back from its own Inventory.StockMovement
+    /// rows) and refuses if any of it has since moved on elsewhere.</summary>
+    [RequirePermission("StockOpening.Delete")]
+    [HttpDelete("stock-openings/{id:int}")]
+    public IActionResult DeleteStockOpening(int id)
+    {
+        using var conn = db.CreateConnection();
+        using var tx = conn.BeginTransaction();
+        try
+        {
+            var header = conn.QueryFirstOrDefault("SELECT * FROM Inventory.StockOpening WHERE StockOpeningId = @id", new { id }, tx);
+            if (header is null) { tx.Rollback(); return NotFound(); }
+
+            var lines = conn.Query("SELECT * FROM Inventory.StockOpeningLine WHERE StockOpeningId = @id", new { id }, tx).ToList();
+
+            var movements = conn.Query<(int ProductId, int GodownId, decimal Qty)>(
+                "SELECT ProductId, GodownId, Qty FROM Inventory.StockMovement WHERE DocType = 'StockOpening' AND DocId = @id AND MovementType = 'Opening'",
+                new { id }, tx).ToList();
+
+            foreach (var m in movements)
+            {
+                var current = conn.ExecuteScalar<decimal?>(
+                    "SELECT QtyOnHand FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { m.ProductId, m.GodownId }, tx) ?? 0m;
+                if (current - m.Qty < 0)
+                {
+                    tx.Rollback();
+                    var product = conn.QueryFirstOrDefault<string>("SELECT Code FROM Master.Product WHERE ProductId = @ProductId", new { m.ProductId }, tx);
+                    return Conflict(new ProblemResponse
+                    {
+                        Title = "Stock already moved",
+                        Status = 409,
+                        ErrorCode = "OPENING_STOCK_MOVED",
+                        Detail = $"{product ?? $"Product {m.ProductId}"}: stock has moved on since this opening entry (only {current} now on hand); reversing it would take the balance negative. This entry cannot be deleted.",
+                    });
+                }
+            }
+
+            foreach (var m in movements)
+            {
+                conn.Execute(
+                    "UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @Qty WHERE ProductId = @ProductId AND GodownId = @GodownId",
+                    new { m.Qty, m.ProductId, m.GodownId }, tx);
+            }
+            conn.Execute("DELETE FROM Inventory.StockMovement WHERE DocType = 'StockOpening' AND DocId = @id", new { id }, tx);
+            conn.Execute("DELETE FROM Inventory.StockOpeningLine WHERE StockOpeningId = @id", new { id }, tx);
+            conn.Execute("DELETE FROM Inventory.StockOpening WHERE StockOpeningId = @id", new { id }, tx);
+            AuditLogger.LogDelete(conn, tx, User, HttpContext, "StockOpening", id.ToString(), new { Opening = header, Lines = lines, ReversedStockMovements = movements });
+            tx.Commit();
+            return NoContent();
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
     // ---------------- Stock Adjustment ----------------
     [HttpGet("stock-adjustments")]
     public IActionResult ListAdjustments()
