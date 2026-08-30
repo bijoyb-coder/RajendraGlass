@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, Ban } from 'lucide-react'
+import { ArrowLeft, Ban, Printer } from 'lucide-react'
 import { useGetCuttingEntryQuery, useDeleteCuttingEntryMutation } from './cuttingEntryApi'
 import { confirmAction, alertError, alertSuccess } from '../../lib/alerts'
 
@@ -38,22 +38,30 @@ export default function CuttingEntryViewPage() {
 
   return (
     <div className="max-w-5xl mx-auto animate-fade-in">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 no-print">
         <button onClick={() => navigate(-1)} className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700">
           <ArrowLeft size={15} /> Back
         </button>
-        {c.status !== 'Cancelled' && (
+        <div className="flex gap-2">
+          {c.status !== 'Cancelled' && (
+            <button
+              onClick={handleCancel}
+              disabled={cancelling}
+              className="inline-flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition disabled:opacity-60"
+            >
+              <Ban size={15} /> {cancelling ? 'Cancelling…' : 'Cancel Entry'}
+            </button>
+          )}
           <button
-            onClick={handleCancel}
-            disabled={cancelling}
-            className="inline-flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition disabled:opacity-60"
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2 rounded-lg shadow transition"
           >
-            <Ban size={15} /> {cancelling ? 'Cancelling…' : 'Cancel Entry'}
+            <Printer size={15} /> Print
           </button>
-        )}
+        </div>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8">
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-8 print:shadow-none print:border-0">
         <div className="flex items-start justify-between border-b-2 border-brand-800 pb-4 mb-4">
           <div>
             <h2 className="text-lg font-bold text-brand-900">CUTTING ENTRY</h2>
