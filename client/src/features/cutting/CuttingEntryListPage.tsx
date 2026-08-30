@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Plus, Ruler, Eye } from 'lucide-react'
+import { Plus, Ruler, Printer } from 'lucide-react'
 import { useListCuttingEntriesQuery } from './cuttingEntryApi'
 import { useDataGrid, SortIcon, SortableTh, Th, DataGridSearchBar, DataGridPagination, DATA_GRID_HEAD_ROW_CLASS, DATA_GRID_ROW_CLASS, ActionTh } from '../../components/DataGrid'
 import type { CuttingEntryDto } from '../../lib/types'
@@ -105,7 +105,7 @@ export default function CuttingEntryListPage() {
                   </td>
                   <td className="px-5 py-3 text-right">
                     <Link to={`/sales/cutting/${c.cuttingEntryId}`} className="inline-flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-brand-700">
-                      <Eye size={14} /> View
+                      <Printer size={14} /> View / Print
                     </Link>
                   </td>
                 </tr>
