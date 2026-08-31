@@ -35,7 +35,6 @@ export default function QuotationViewPage() {
   // not this raw line sum — q.roundOff is exactly the gap between the two.
   const basic = q.lines.reduce((s, l) => s + l.basicAmount, 0)
   const discount = q.lines.reduce((s, l) => s + l.discountAmount, 0)
-  const gst = q.lines.reduce((s, l) => s + l.gstAmount, 0)
   const anyOverride = q.lines.some((l) => l.isAreaManualOverride || l.isAmountManualOverride)
   const hasAnyHolesCutout = (q.totalHoleQty ?? 0) > 0 || (q.totalBHoleQty ?? 0) > 0 || (q.totalCutoutQty ?? 0) > 0 || (q.totalBCutoutQty ?? 0) > 0
 
@@ -102,7 +101,6 @@ export default function QuotationViewPage() {
                 <th className="py-2 font-medium text-right">Area</th>
                 <th className="py-2 font-medium text-right">Rate</th>
                 <th className="py-2 font-medium text-right">Basic</th>
-                <th className="py-2 font-medium text-right">GST</th>
                 <th className="py-2 font-medium text-right">Amount</th>
               </tr>
             </thead>
@@ -141,10 +139,6 @@ export default function QuotationViewPage() {
                     {l.isAmountManualOverride && <div className="text-[11px] text-amber-600">manual</div>}
                     {l.discountAmount > 0 && <div className="text-[11px] text-slate-400">− {money(l.discountAmount)} disc</div>}
                   </td>
-                  <td className="py-2.5 text-right text-slate-700">
-                    {money(l.gstAmount)}
-                    <div className="text-[11px] text-slate-400">@ {num(l.gstPct, 0)}%</div>
-                  </td>
                   <td className="py-2.5 text-right font-medium text-slate-800">{money(l.amount)}</td>
                 </tr>
               ))}
@@ -167,8 +161,7 @@ export default function QuotationViewPage() {
               </div>
             )}
             {discount > 0 && <Row label="Discount" value={`− ${money(discount)}`} />}
-            <Row label="GST" value={money(gst)} />
-            <Row label="Round Off" value={money(q.roundOff)} />
+            {q.roundOffEnabled && <Row label="Round Off" value={money(q.roundOff)} />}
             <div className="flex justify-between font-bold text-brand-900 border-t-2 border-brand-800 pt-2 mt-2 text-base">
               <span>Total</span><span>₹ {money(q.totalValue)}</span>
             </div>

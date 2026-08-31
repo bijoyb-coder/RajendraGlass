@@ -526,8 +526,10 @@ export interface QuotationDto {
   customerType?: CustomerType | null; customerAddress?: string | null; customerGstin?: string | null
   customerMobile?: string | null; customerStateName?: string | null
   quotationDate: string; validUntil?: string | null; status: string
-  /** Always rounded to the nearest whole rupee; the delta is roundOff. */
+  /** Rounded to the nearest whole rupee only while roundOffEnabled; the delta is roundOff. */
   totalValue: number; roundOff: number
+  /** Document-level "round to nearest rupee" checkbox -- not per line. Defaults true. */
+  roundOffEnabled: boolean
   /** True while no sales order has been generated against this quotation. */
   canDelete: boolean
   /** One rate per hole/cutout type, entered once for the whole document (not per line) and
@@ -566,6 +568,8 @@ export interface CreateQuotationRequest {
   validUntil?: string
   /** One rate per hole/cutout type, applied to the sum of every line's qty for that type. */
   holeRate?: number; bHoleRate?: number; cutoutRate?: number; bCutoutRate?: number
+  /** Document-level "round to nearest rupee" checkbox. Defaults true server-side if omitted. */
+  roundOffEnabled?: boolean
   lines: CreateQuotationLine[]
 }
 /** PUT /quotations/{id}. No inline new-customer here — an edit targets an existing quotation. */
@@ -573,6 +577,7 @@ export interface UpdateQuotationRequest {
   customerId: number
   validUntil?: string
   holeRate?: number; bHoleRate?: number; cutoutRate?: number; bCutoutRate?: number
+  roundOffEnabled?: boolean
   lines: CreateQuotationLine[]
 }
 

@@ -138,8 +138,10 @@ export function presetOf(l: SalesLine): PresetKey | "CUSTOM" {
   return "CUSTOM";
 }
 
-/** Live preview only — the server recalculates on save. */
-export function calcLine(l: SalesLine) {
+/** Live preview only — the server recalculates on save. `showGst = false` (Quotations) prices the
+ * line as if its GST % were 0, without touching the line's own stored gstPct -- see the `showGst`
+ * prop below. */
+export function calcLine(l: SalesLine, showGst = true) {
   return calculateLine({
     length: l.length,
     width: l.width,
@@ -150,7 +152,7 @@ export function calcLine(l: SalesLine) {
     thicknessMm: l.thicknessMm,
     applyThickness: l.applyThickness,
     chargeRoundingInch: l.chargeRoundingInch,
-    gstPct: l.gstPct,
+    gstPct: showGst ? l.gstPct : 0,
     discountPct: l.discountPct,
     manualArea: l.manualArea,
     manualBasicAmount: l.manualBasicAmount,
@@ -242,10 +244,10 @@ export function toCreateLine(l: SalesLine): CreateQuotationLine {
   };
 }
 
-export function lineTotals(lines: SalesLine[]) {
+export function lineTotals(lines: SalesLine[], showGst = true) {
   return lines.reduce(
     (acc, l) => {
-      const c = calcLine(l);
+      const c = calcLine(l, showGst);
       return {
         basic: acc.basic + c.basicAmount,
         discount: acc.discount + c.discountAmount,
@@ -304,6 +306,11 @@ export interface HolesCutoutRates {
   onChange: (patch: Partial<Pick<HolesCutoutRates, "holeRate" | "bHoleRate" | "cutoutRate" | "bCutoutRate">>) => void;
 }
 
+export interface RoundOffToggle {
+  enabled: boolean;
+  onChange: (enabled: boolean) => void;
+}
+
 interface Props {
   lines: SalesLine[];
   products?: { items: ProductDto[] };
@@ -312,9 +319,16 @@ interface Props {
    * inputs in the totals footer. Omit to hide the whole feature (e.g. Sales Orders, which don't
    * use it) without duplicating this grid. */
   holesCutout?: HolesCutoutRates;
+  /** false hides the GST % column and every GST figure in this grid (Quotations don't carry GST)
+   * without touching a line's own stored gstPct or Sales Orders, which still price with GST.
+   * Defaults to true so every existing caller keeps its current behaviour. */
+  showGst?: boolean;
+  /** Document-level "round to the nearest rupee" checkbox shown next to Total -- not per line.
+   * Omit to leave the total unrounded (e.g. Sales Orders, which don't offer this). */
+  roundOff?: RoundOffToggle;
 }
 
-export default function SalesLineGrid({ lines, products, onChange, holesCutout }: Props) {
+export default function SalesLineGrid({ lines, products, onChange, holesCutout, showGst = true, roundOff }: Props) {
   // Free stock across every godown, by product — checked live as a product/qty is entered so a
   // shortage shows before the document is even saved, not discovered at dispatch time.
   const { data: stockSummary } = useStockSummaryQuery();
@@ -352,7 +366,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout }
     });
   }
 
-  const totals = lineTotals(lines);
+  const totals = lineTotals(lines, showGst);
   const totalHoleQty = lines.reduce((s, l) => s + (l.holeQty || 0), 0);
   const totalBHoleQty = lines.reduce((s, l) => s + (l.bHoleQty || 0), 0);
   const totalCutoutQty = lines.reduce((s, l) => s + (l.cutoutQty || 0), 0);
@@ -364,6 +378,8 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout }
       totalBCutoutQty * holesCutout.bCutoutRate
     : 0;
   const hasAnyHolesCutout = totalHoleQty > 0 || totalBHoleQty > 0 || totalCutoutQty > 0 || totalBCutoutQty > 0;
+  const rawTotal = totals.amount + holesCutoutAmount;
+  const displayTotal = roundOff?.enabled ? Math.round(rawTotal) : rawTotal;
 
   return (
     <>
@@ -382,7 +398,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout }
               <th className="py-2 font-medium w-28">Rate Unit</th>
               <th className="py-2 font-medium w-32">Basic Amount</th>
               <th className="py-2 font-medium w-20">Disc %</th>
-              <th className="py-2 font-medium w-20">GST %</th>
+              {showGst && <th className="py-2 font-medium w-20">GST %</th>}
               {holesCutout && (
                 <>
                   <th className="py-2 font-medium w-16">Hole</th>
@@ -397,7 +413,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout }
           </thead>
           <tbody className="divide-y divide-slate-100">
             {lines.map((l) => {
-              const c = calcLine(l);
+              const c = calcLine(l, showGst);
               const preset = presetOf(l);
               const perPiece = l.rateUnit === "PER_PIECE";
               const shortage = stockShortage(l);
@@ -662,17 +678,19 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout }
                       className={cellInput}
                     />
                   </td>
-                  <td className="py-2 pr-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step="0.01"
-                      value={l.gstPct}
-                      onChange={(e) => updateLine(l.key, { gstPct: Number(e.target.value) })}
-                      className={cellInput}
-                    />
-                  </td>
+                  {showGst && (
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        value={l.gstPct}
+                        onChange={(e) => updateLine(l.key, { gstPct: Number(e.target.value) })}
+                        className={cellInput}
+                      />
+                    </td>
+                  )}
 
                   {holesCutout && (
                     <>
@@ -692,9 +710,11 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout }
                   )}
                   <td className="py-2 pr-2 text-right font-medium text-slate-700">
                     {money(c.finalAmount)}
-                    <div className="text-[11px] font-normal text-slate-400">
-                      {money(c.taxableAmount)} + {money(c.gstAmount)} GST
-                    </div>
+                    {showGst && (
+                      <div className="text-[11px] font-normal text-slate-400">
+                        {money(c.taxableAmount)} + {money(c.gstAmount)} GST
+                      </div>
+                    )}
                   </td>
                   <td className="py-2">
                     <button
@@ -748,11 +768,29 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout }
               Discount: <span className="font-medium text-slate-700">− {money(totals.discount)}</span>
             </div>
           )}
-          <div className="text-slate-500">
-            GST: <span className="font-medium text-slate-700">{money(totals.gst)}</span>
-          </div>
+          {showGst && (
+            <div className="text-slate-500">
+              GST: <span className="font-medium text-slate-700">{money(totals.gst)}</span>
+            </div>
+          )}
+          {roundOff && (
+            <label className="flex items-center justify-end gap-1.5 text-slate-500 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={roundOff.enabled}
+                onChange={(e) => roundOff.onChange(e.target.checked)}
+                className="rounded border-slate-300"
+              />
+              Round Off
+              {roundOff.enabled && Math.abs(displayTotal - rawTotal) > 0.001 && (
+                <span className="font-medium text-slate-700">
+                  ({displayTotal - rawTotal >= 0 ? "+" : "−"}{money(Math.abs(displayTotal - rawTotal))})
+                </span>
+              )}
+            </label>
+          )}
           <div className="text-base font-bold text-brand-900 mt-0.5">
-            Total: {money(totals.amount + holesCutoutAmount)}
+            Total: {money(displayTotal)}
           </div>
         </div>
       </div>
