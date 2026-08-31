@@ -1,14 +1,15 @@
 import { useMemo, useState } from 'react'
-import { BarChart3, Printer, Wallet2, Warehouse, LayoutGrid, Layers } from 'lucide-react'
+import { BarChart3, Printer, Wallet2, Warehouse, LayoutGrid, Layers, Banknote } from 'lucide-react'
 import {
   useStockSummaryQuery, useStockGodownSummaryQuery, useStockRackDetailQuery, useInventoryStatusQuery,
-  useSalesRegisterQuery, useReceivablesAgeingQuery, useCustomerTransactionsQuery,
+  useSalesRegisterQuery, useCollectionRegisterQuery, useReceivablesAgeingQuery, useCustomerTransactionsQuery,
 } from './reportsApi'
 import { useListCustomersQuery } from '../masters/mastersApi'
 import {
   useDataGrid,
   SortIcon,
   SortableTh,
+  Th,
   DataGridSearchBar,
   DataGridButton,
   DataGridPagination,
@@ -16,12 +17,37 @@ import {
   DATA_GRID_ROW_CLASS,
   printReport,
 } from '../../components/DataGrid'
-import type { StockSummaryReportRow, SalesRegisterRow, CustomerTransactionRow, GodownStockSummaryRow, RackStockDetailRow, InventoryStatusRow } from '../../lib/types'
+import { alertError } from '../../lib/alerts'
+import type { StockSummaryReportRow, SalesRegisterRow, CollectionRegisterRow, CustomerTransactionRow, GodownStockSummaryRow, RackStockDetailRow, InventoryStatusRow } from '../../lib/types'
 
 function money(n: number) { return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n) }
 function qty(n: number) { return n.toLocaleString('en-IN', { maximumFractionDigits: 3 }) }
 
-const tabs = ['Stock Summary', 'Godown Stock Summary', 'Godown/Rack Stock Detail', 'Inventory Status', 'Sales Register', 'Receivables Ageing', 'Customer Transactions'] as const
+const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
+
+/** Shared by every date-range report filter: rejects a From/To combination where From is after
+ * To, via SweetAlert, and never lets the invalid value land in state -- so the underlying report
+ * query is never even asked to run with a backwards range. */
+function makeDateRangeSetters(from: string, to: string, setFrom: (v: string) => void, setTo: (v: string) => void) {
+  return {
+    onFromChange: (value: string) => {
+      if (value && to && value > to) {
+        void alertError('Invalid Date Range', 'From Date cannot be greater than To Date.')
+        return
+      }
+      setFrom(value)
+    },
+    onToChange: (value: string) => {
+      if (value && from && value < from) {
+        void alertError('Invalid Date Range', 'To Date cannot be earlier than From Date.')
+        return
+      }
+      setTo(value)
+    },
+  }
+}
+
+const tabs = ['Stock Summary', 'Godown Stock Summary', 'Godown/Rack Stock Detail', 'Inventory Status', 'Sales Register', 'Collection Register', 'Receivables Ageing', 'Customer Transactions'] as const
 type Tab = (typeof tabs)[number]
 
 interface AgeingRow { customerName: string; invoiceNo: string; invoiceDate: string; totalValue: number; ageDays: number }
@@ -31,6 +57,7 @@ type GodownSortKey = 'godownName' | 'productCode' | 'qtyOnHand' | 'qtyFree'
 type InventoryStatusSortKey = 'productCode' | 'godownName' | 'qtyOnHand' | 'qtyFree' | 'sheetEquivalent' | 'offcutCount' | 'offcutAreaInStockUnit'
 type RackSortKey = 'godownName' | 'rackCode' | 'productCode' | 'rackQty' | 'godownBookQty' | 'variance'
 type SalesSortKey = 'invoiceNo' | 'invoiceDate' | 'customerName' | 'taxableValue' | 'taxValue' | 'totalValue'
+type CollectionSortKey = 'voucherNo' | 'voucherDate' | 'customerName' | 'mode' | 'amount'
 type AgeingSortKey = 'customerName' | 'invoiceNo' | 'invoiceDate' | 'totalValue' | 'ageDays'
 type TxnSortKey = 'txnDate' | 'type' | 'docNo' | 'debit' | 'credit' | 'balance'
 
@@ -40,9 +67,29 @@ export default function ReportsPage() {
   const { data: godownSummary, isLoading: loadingGodownSummary } = useStockGodownSummaryQuery(undefined, { skip: tab !== 'Godown Stock Summary' })
   const { data: rackDetail, isLoading: loadingRackDetail } = useStockRackDetailQuery(undefined, { skip: tab !== 'Godown/Rack Stock Detail' })
   const { data: inventoryStatus, isLoading: loadingInventoryStatus } = useInventoryStatusQuery(undefined, { skip: tab !== 'Inventory Status' })
-  const { data: sales, isLoading: loadingSales } = useSalesRegisterQuery(undefined, { skip: tab !== 'Sales Register' })
+  // ---------- Sales Register: From/To Date + optional Customer ----------
+  const [salesFrom, setSalesFrom] = useState('')
+  const [salesTo, setSalesTo] = useState('')
+  const [salesCustomerId, setSalesCustomerId] = useState<number | ''>('')
+  const salesDateSetters = makeDateRangeSetters(salesFrom, salesTo, setSalesFrom, setSalesTo)
+  const { data: sales, isLoading: loadingSales } = useSalesRegisterQuery(
+    { from: salesFrom || undefined, to: salesTo || undefined, customerId: salesCustomerId || undefined },
+    { skip: tab !== 'Sales Register' },
+  )
+
+  // ---------- Collection Register: From/To Date, Collection Type, optional Customer ----------
+  const [collFrom, setCollFrom] = useState('')
+  const [collTo, setCollTo] = useState('')
+  const [collMode, setCollMode] = useState('')
+  const [collCustomerId, setCollCustomerId] = useState<number | ''>('')
+  const collDateSetters = makeDateRangeSetters(collFrom, collTo, setCollFrom, setCollTo)
+  const { data: collections, isLoading: loadingCollections } = useCollectionRegisterQuery(
+    { from: collFrom || undefined, to: collTo || undefined, mode: collMode || undefined, customerId: collCustomerId || undefined },
+    { skip: tab !== 'Collection Register' },
+  )
+
   const { data: ageing, isLoading: loadingAgeing } = useReceivablesAgeingQuery(undefined, { skip: tab !== 'Receivables Ageing' })
-  const { data: customers } = useListCustomersQuery(undefined, { skip: tab !== 'Customer Transactions' })
+  const { data: customers } = useListCustomersQuery(undefined, { skip: tab !== 'Customer Transactions' && tab !== 'Sales Register' && tab !== 'Collection Register' })
   const [txnCustomerId, setTxnCustomerId] = useState<number | ''>('')
   const [txnPhoneSearch, setTxnPhoneSearch] = useState('')
   const { data: txnReport, isLoading: loadingTxn } = useCustomerTransactionsQuery(txnCustomerId as number, { skip: tab !== 'Customer Transactions' || !txnCustomerId })
@@ -117,6 +164,23 @@ export default function ReportsPage() {
       totalValue: (a, b) => a.totalValue - b.totalValue,
     },
     matches: (s, term) => s.invoiceNo.toLowerCase().includes(term) || s.customerName.toLowerCase().includes(term),
+  })
+
+  const collectionGrid = useDataGrid<CollectionRegisterRow, CollectionSortKey>(collections?.items, {
+    defaultSortKey: 'voucherDate',
+    defaultSortDir: 'desc',
+    comparators: {
+      voucherNo: (a, b) => (a.voucherNo ?? '').localeCompare(b.voucherNo ?? ''),
+      voucherDate: (a, b) => new Date(a.voucherDate).getTime() - new Date(b.voucherDate).getTime(),
+      customerName: (a, b) => (a.customerName ?? '').localeCompare(b.customerName ?? ''),
+      mode: (a, b) => a.mode.localeCompare(b.mode),
+      amount: (a, b) => a.amount - b.amount,
+    },
+    matches: (r, term) =>
+      !!r.voucherNo?.toLowerCase().includes(term) ||
+      !!r.customerName?.toLowerCase().includes(term) ||
+      r.mode.toLowerCase().includes(term) ||
+      !!r.referenceNo?.toLowerCase().includes(term),
   })
 
   const ageingGrid = useDataGrid<AgeingRow, AgeingSortKey>(ageing?.items, {
@@ -230,6 +294,25 @@ export default function ReportsPage() {
         money(s.totalValue),
       ]),
       totalRow: sales && sales.items.length > 0 ? [null, null, null, null, 'Total', money(sales.total)] : undefined,
+    })
+  }
+
+  function printCollections() {
+    printReport({
+      title: 'Collection Register',
+      columns: [
+        { label: 'Voucher No.' }, { label: 'Date' }, { label: 'Customer' },
+        { label: 'Mode' }, { label: 'Reference' }, { label: 'Amount', align: 'right' },
+      ],
+      rows: collectionGrid.allRows.map((r) => [
+        r.voucherNo ?? '—',
+        new Date(r.voucherDate).toLocaleDateString('en-IN'),
+        r.customerName ?? '—',
+        r.mode,
+        r.referenceNo ?? '—',
+        money(r.amount),
+      ]),
+      totalRow: collections && collections.items.length > 0 ? [null, null, null, null, 'Total', money(collections.total)] : undefined,
     })
   }
 
@@ -556,7 +639,25 @@ export default function ReportsPage() {
       )}
 
       {tab === 'Sales Register' && (
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 grid sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">From Date</label>
+              <input type="date" value={salesFrom} max={salesTo || undefined} onChange={(e) => salesDateSetters.onFromChange(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">To Date</label>
+              <input type="date" value={salesTo} min={salesFrom || undefined} onChange={(e) => salesDateSetters.onToChange(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Customer (optional)</label>
+              <select value={salesCustomerId} onChange={(e) => setSalesCustomerId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
+                <option value="">All customers</option>
+                {customers?.items.map((c) => <option key={c.customerId} value={c.customerId}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <DataGridSearchBar
             value={salesGrid.search}
             onChange={salesGrid.setSearch}
@@ -628,6 +729,111 @@ export default function ReportsPage() {
             endIndex={salesGrid.endIndex}
             onPageChange={salesGrid.setPage}
           />
+          </div>
+        </div>
+      )}
+
+      {tab === 'Collection Register' && (
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 grid sm:grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">From Date</label>
+              <input type="date" value={collFrom} max={collTo || undefined} onChange={(e) => collDateSetters.onFromChange(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">To Date</label>
+              <input type="date" value={collTo} min={collFrom || undefined} onChange={(e) => collDateSetters.onToChange(e.target.value)} className={inputClass} />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Collection Type</label>
+              <select value={collMode} onChange={(e) => setCollMode(e.target.value)} className={inputClass}>
+                <option value="">All types</option>
+                <option value="Cash">Cash</option>
+                <option value="Bank">Bank</option>
+                <option value="Cheque">Cheque</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Customer (optional)</label>
+              <select value={collCustomerId} onChange={(e) => setCollCustomerId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
+                <option value="">All customers</option>
+                {customers?.items.map((c) => <option key={c.customerId} value={c.customerId}>{c.name}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+            <DataGridSearchBar
+              value={collectionGrid.search}
+              onChange={collectionGrid.setSearch}
+              placeholder="Search voucher no., customer, mode or reference…"
+              pageSize={collectionGrid.pageSize}
+              onPageSizeChange={collectionGrid.setPageSize}
+              rightSlot={<DataGridButton onClick={printCollections} title="Print this report"><Printer size={15} /> Print</DataGridButton>}
+            />
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={DATA_GRID_HEAD_ROW_CLASS}>
+                    <SortableTh onClick={() => collectionGrid.toggleSort('voucherNo')}>
+                      Voucher No. <SortIcon column="voucherNo" sortKey={collectionGrid.sortKey} sortDir={collectionGrid.sortDir} />
+                    </SortableTh>
+                    <SortableTh onClick={() => collectionGrid.toggleSort('voucherDate')}>
+                      Date <SortIcon column="voucherDate" sortKey={collectionGrid.sortKey} sortDir={collectionGrid.sortDir} />
+                    </SortableTh>
+                    <SortableTh onClick={() => collectionGrid.toggleSort('customerName')}>
+                      Customer <SortIcon column="customerName" sortKey={collectionGrid.sortKey} sortDir={collectionGrid.sortDir} />
+                    </SortableTh>
+                    <SortableTh onClick={() => collectionGrid.toggleSort('mode')}>
+                      Mode <SortIcon column="mode" sortKey={collectionGrid.sortKey} sortDir={collectionGrid.sortDir} />
+                    </SortableTh>
+                    <Th>Reference</Th>
+                    <SortableTh onClick={() => collectionGrid.toggleSort('amount')} align="right">
+                      Amount <SortIcon column="amount" sortKey={collectionGrid.sortKey} sortDir={collectionGrid.sortDir} />
+                    </SortableTh>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loadingCollections && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+                  {!loadingCollections && collectionGrid.rows.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="px-5 py-14 text-center text-slate-400">
+                        <Banknote size={28} className="mx-auto mb-2 text-slate-300" />
+                        {collectionGrid.search ? 'No collections match your search.' : 'No collections recorded yet.'}
+                      </td>
+                    </tr>
+                  )}
+                  {collectionGrid.rows.map((r) => (
+                    <tr key={r.voucherId} className={DATA_GRID_ROW_CLASS}>
+                      <td className="px-5 py-3 font-medium text-brand-700">{r.voucherNo ?? '—'}</td>
+                      <td className="px-5 py-3 text-slate-600">{new Date(r.voucherDate).toLocaleDateString('en-IN')}</td>
+                      <td className="px-5 py-3 text-slate-700">{r.customerName ?? '—'}</td>
+                      <td className="px-5 py-3">
+                        <span className="inline-flex text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">{r.mode}</span>
+                      </td>
+                      <td className="px-5 py-3 text-slate-500">{r.referenceNo ?? '—'}</td>
+                      <td className="px-5 py-3 text-right font-semibold text-slate-800">{money(r.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                {collections && collections.items.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t border-slate-200">
+                      <td colSpan={5} className="px-5 py-3 text-right text-sm font-semibold text-slate-600">Total (all matching rows)</td>
+                      <td className="px-5 py-3 text-right text-sm font-bold text-brand-900">{money(collections.total)}</td>
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+            <DataGridPagination
+              page={collectionGrid.page}
+              pageCount={collectionGrid.pageCount}
+              totalCount={collectionGrid.totalCount}
+              startIndex={collectionGrid.startIndex}
+              endIndex={collectionGrid.endIndex}
+              onPageChange={collectionGrid.setPage}
+            />
+          </div>
         </div>
       )}
 

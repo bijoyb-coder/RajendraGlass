@@ -121,7 +121,7 @@ public class ReportsController(IDbConnectionFactory db) : ControllerBase
     }
 
     [HttpGet("sales-register")]
-    public IActionResult SalesRegister([FromQuery] DateTime? from, [FromQuery] DateTime? to)
+    public IActionResult SalesRegister([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] int? customerId)
     {
         using var conn = db.CreateConnection();
         var rows = conn.Query<SalesRegisterRow>(
@@ -130,8 +130,31 @@ public class ReportsController(IDbConnectionFactory db) : ControllerBase
               FROM Sales.Invoice i JOIN Master.Customer c ON c.CustomerId = i.CustomerId
               WHERE i.Status <> 'Cancelled'
                 AND (@from IS NULL OR i.InvoiceDate >= @from) AND (@to IS NULL OR i.InvoiceDate <= @to)
-              ORDER BY i.InvoiceDate DESC", new { from, to });
+                AND (@customerId IS NULL OR i.CustomerId = @customerId)
+              ORDER BY i.InvoiceDate DESC", new { from, to, customerId });
         return Ok(new { items = rows, total = rows.Sum(r => r.TotalValue) });
+    }
+
+    /// <summary>Every Receipt voucher -- money actually collected from a customer, in Cash, Bank,
+    /// Cheque or UPI -- across the whole business, not scoped to one customer the way Customer
+    /// Transactions is. Mode left unfiltered (the default) never hides a collection, even one made
+    /// in a mode outside the three named on the filter (e.g. UPI).</summary>
+    [HttpGet("collection-register")]
+    public IActionResult CollectionRegister([FromQuery] DateTime? from, [FromQuery] DateTime? to, [FromQuery] string? mode, [FromQuery] int? customerId)
+    {
+        using var conn = db.CreateConnection();
+        var rows = conn.Query<CollectionRegisterRow>(
+            @"SELECT v.VoucherId, v.VoucherNo, v.VoucherDate, v.CustomerId, c.Name AS CustomerName,
+                     i.InvoiceNo, v.Mode, v.ReferenceNo, v.Amount, v.Narration
+              FROM Finance.Voucher v
+              LEFT JOIN Master.Customer c ON c.CustomerId = v.CustomerId
+              LEFT JOIN Sales.Invoice i ON i.InvoiceId = v.InvoiceId
+              WHERE v.VoucherType = 'Receipt'
+                AND (@from IS NULL OR v.VoucherDate >= @from) AND (@to IS NULL OR v.VoucherDate <= @to)
+                AND (@mode IS NULL OR v.Mode = @mode)
+                AND (@customerId IS NULL OR v.CustomerId = @customerId)
+              ORDER BY v.VoucherDate DESC, v.VoucherId DESC", new { from, to, mode, customerId });
+        return Ok(new { items = rows, total = rows.Sum(r => r.Amount) });
     }
 
     [HttpGet("receivables-ageing")]
