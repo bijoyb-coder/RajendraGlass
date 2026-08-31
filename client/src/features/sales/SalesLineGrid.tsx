@@ -11,6 +11,7 @@ import {
 import type { DimensionUnit, RateUnit } from "../../lib/quotationCalc";
 import type { CreateQuotationLine, ProductDto } from "../../lib/types";
 import { useStockSummaryQuery } from "../reports/reportsApi";
+import { parseGlassDimension } from "../../lib/glassDimension";
 
 /**
  * The line-entry grid shared by Quotations and Sales Orders. Both documents hold the same
@@ -76,6 +77,14 @@ export interface SalesLine {
   thicknessMm: number;
   length: number;
   width: number;
+  /** What's actually typed into the Length/Width cells -- kept separate from the parsed decimal
+   * (`length`/`width`) so the field can show "20 1/4" while it's being typed rather than snapping
+   * to "20.25" mid-keystroke. Accepts a plain decimal (1.22, 1.88) or glass-industry fraction
+   * notation (20 1/4, 21 1/2, 20¼); parseGlassDimension converts either into the same decimal
+   * `length`/`width` this line has always carried -- everything downstream (calcLine, save) is
+   * unchanged. UI-only: never sent to the server. */
+  lengthText: string;
+  widthText: string;
   dimensionUnit: DimensionUnit;
   qty: number;
   rate: number;
@@ -96,6 +105,8 @@ export const emptyLine = (preset: PresetKey = "SHEET_SQM"): SalesLine => ({
   thicknessMm: 0,
   length: 0,
   width: 0,
+  lengthText: "",
+  widthText: "",
   qty: 1,
   rate: 0,
   gstPct: DEFAULT_GST_PCT,
@@ -174,6 +185,8 @@ export function fromSavedLine(l: SavedLineLike): SalesLine {
     thicknessMm: l.thicknessMm ?? 0,
     length: l.length,
     width: l.width,
+    lengthText: l.length ? String(l.length) : "",
+    widthText: l.width ? String(l.width) : "",
     dimensionUnit: l.dimensionUnit,
     qty: l.qty,
     rate: l.rate,
@@ -414,24 +427,32 @@ export default function SalesLineGrid({ lines, products, onChange }: Props) {
 
                   <td className="py-2 pr-2">
                     <input
-                      type="number"
-                      min={0}
-                      step="0.0001"
                       disabled={perPiece}
-                      value={l.length || ""}
-                      onChange={(e) => updateLine(l.key, { length: Number(e.target.value) })}
-                      className={`${cellInput} disabled:bg-slate-100 disabled:text-slate-400`}
+                      placeholder="1.22 or 20 1/4"
+                      value={l.lengthText}
+                      onChange={(e) => {
+                        const lengthText = e.target.value;
+                        const parsed = parseGlassDimension(lengthText);
+                        if (parsed !== null) updateLine(l.key, { lengthText, length: parsed });
+                        else if (lengthText === "") updateLine(l.key, { lengthText, length: 0 });
+                        else updateLine(l.key, { lengthText });
+                      }}
+                      className={`${cellInput} ${l.lengthText && parseGlassDimension(l.lengthText) === null ? "border-red-300" : ""} disabled:bg-slate-100 disabled:text-slate-400`}
                     />
                   </td>
                   <td className="py-2 pr-2">
                     <input
-                      type="number"
-                      min={0}
-                      step="0.0001"
                       disabled={perPiece}
-                      value={l.width || ""}
-                      onChange={(e) => updateLine(l.key, { width: Number(e.target.value) })}
-                      className={`${cellInput} disabled:bg-slate-100 disabled:text-slate-400`}
+                      placeholder="1.88 or 21 1/2"
+                      value={l.widthText}
+                      onChange={(e) => {
+                        const widthText = e.target.value;
+                        const parsed = parseGlassDimension(widthText);
+                        if (parsed !== null) updateLine(l.key, { widthText, width: parsed });
+                        else if (widthText === "") updateLine(l.key, { widthText, width: 0 });
+                        else updateLine(l.key, { widthText });
+                      }}
+                      className={`${cellInput} ${l.widthText && parseGlassDimension(l.widthText) === null ? "border-red-300" : ""} disabled:bg-slate-100 disabled:text-slate-400`}
                     />
                   </td>
                   <td className="py-2 pr-2">
