@@ -79,6 +79,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                      c.CustomerType, c.BillingAddress AS CustomerAddress, c.Gstin AS CustomerGstin,
                      c.Mobile AS CustomerMobile, c.StateName AS CustomerStateName,
                      q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue, q.RoundOff,
+                     q.HoleRate, q.BHoleRate, q.CutoutRate, q.BCutoutRate,
                      CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM Sales.SalesOrder o WHERE o.QuotationId = q.QuotationId) THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Sales.Quotation q JOIN Master.Customer c ON c.CustomerId = q.CustomerId WHERE q.QuotationId = @id", new { id });
         if (q is null) return NotFound();
@@ -92,10 +93,17 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                      l.CalculatedArea, l.Area, l.AreaUnit, l.EffectiveRate,
                      l.CalculatedBasicAmount, l.ChargeableAmount AS BasicAmount,
                      l.DiscountAmount, l.TaxableAmount, l.GstAmount, l.Amount,
-                     l.CalculationMethod, l.IsAreaManualOverride, l.IsAmountManualOverride
+                     l.CalculationMethod, l.IsAreaManualOverride, l.IsAmountManualOverride,
+                     l.HoleQty, l.BHoleQty, l.CutoutQty, l.BCutoutQty
               FROM Sales.QuotationLine l
               LEFT JOIN Master.Product p ON p.ProductId = l.ProductId
               WHERE l.QuotationId = @id", new { id }).ToList();
+
+        q.TotalHoleQty = q.Lines.Sum(l => l.HoleQty);
+        q.TotalBHoleQty = q.Lines.Sum(l => l.BHoleQty);
+        q.TotalCutoutQty = q.Lines.Sum(l => l.CutoutQty);
+        q.TotalBCutoutQty = q.Lines.Sum(l => l.BCutoutQty);
+        q.HolesCutoutAmount = q.TotalHoleQty * q.HoleRate + q.TotalBHoleQty * q.BHoleRate + q.TotalCutoutQty * q.CutoutRate + q.TotalBCutoutQty * q.BCutoutRate;
         return Ok(q);
     }
 
@@ -129,6 +137,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             return UnprocessableEntity(new ProblemResponse { Title = "No lines", Status = 422, ErrorCode = "LINES_REQUIRED", Detail = "A quotation must have at least one line." });
         if (req.CustomerId <= 0 && req.NewCustomer is null)
             return UnprocessableEntity(new ProblemResponse { Title = "No customer", Status = 422, ErrorCode = "CUSTOMER_REQUIRED", Detail = "Select an existing customer or supply new customer details." });
+        var holesCutoutProblem = ValidateHolesCutout(req.Lines, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate);
+        if (holesCutoutProblem is not null) return Invalid("Holes / Cutout", holesCutoutProblem);
 
         // Server-side validation: the frontend validates for a fast response, but the server
         // must never accept a line it cannot price correctly.
@@ -178,13 +188,18 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
 
             decimal total = 0;
             var id = conn.ExecuteScalar<int>(
-                @"INSERT INTO Sales.Quotation (QuotationNo, CustomerId, BranchId, ValidUntil, Status, TotalValue)
-                  OUTPUT INSERTED.QuotationId VALUES (@qNo, @customerId, @branchId, @ValidUntil, 'Sent', 0)",
-                new { qNo, customerId, branchId, req.ValidUntil }, tx);
+                @"INSERT INTO Sales.Quotation (QuotationNo, CustomerId, BranchId, ValidUntil, Status, TotalValue, HoleRate, BHoleRate, CutoutRate, BCutoutRate)
+                  OUTPUT INSERTED.QuotationId VALUES (@qNo, @customerId, @branchId, @ValidUntil, 'Sent', 0, @HoleRate, @BHoleRate, @CutoutRate, @BCutoutRate)",
+                new { qNo, customerId, branchId, req.ValidUntil, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate }, tx);
 
             var thicknessByProduct = ThicknessByProduct(conn, tx, req.Lines);
             foreach (var l in req.Lines)
                 total += InsertLine(conn, tx, id, l, thicknessByProduct);
+
+            // Item-wise hole/cutout quantities, summed across every line and priced at the
+            // document's own rates -- added into the basic total right alongside every line's own
+            // amount, before the round-to-nearest-rupee step below.
+            total += HolesCutoutAmount(req.Lines, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate);
 
             // Total is always rounded to the nearest whole rupee, same convention Invoice already
             // uses; the delta is kept in RoundOff so the printed total reconciles with the lines.
@@ -210,6 +225,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             return UnprocessableEntity(new ProblemResponse { Title = "No lines", Status = 422, ErrorCode = "LINES_REQUIRED", Detail = "A quotation must have at least one line." });
         if (req.CustomerId <= 0)
             return UnprocessableEntity(new ProblemResponse { Title = "No customer", Status = 422, ErrorCode = "CUSTOMER_REQUIRED", Detail = "Select a customer." });
+        var holesCutoutProblem = ValidateHolesCutout(req.Lines, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate);
+        if (holesCutoutProblem is not null) return Invalid("Holes / Cutout", holesCutoutProblem);
 
         for (int i = 0; i < req.Lines.Count; i++)
         {
@@ -241,12 +258,15 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             var thicknessByProduct = ThicknessByProduct(conn, tx, req.Lines);
             foreach (var l in req.Lines)
                 total += InsertLine(conn, tx, id, l, thicknessByProduct);
+            total += HolesCutoutAmount(req.Lines, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate);
 
             decimal rounded = Math.Round(total, 0, MidpointRounding.AwayFromZero);
             decimal roundOff = rounded - total;
             conn.Execute(
-                "UPDATE Sales.Quotation SET CustomerId = @CustomerId, ValidUntil = @ValidUntil, TotalValue = @rounded, RoundOff = @roundOff WHERE QuotationId = @id",
-                new { req.CustomerId, req.ValidUntil, rounded, roundOff, id }, tx);
+                @"UPDATE Sales.Quotation SET CustomerId = @CustomerId, ValidUntil = @ValidUntil, TotalValue = @rounded, RoundOff = @roundOff,
+                         HoleRate = @HoleRate, BHoleRate = @BHoleRate, CutoutRate = @CutoutRate, BCutoutRate = @BCutoutRate
+                  WHERE QuotationId = @id",
+                new { req.CustomerId, req.ValidUntil, rounded, roundOff, id, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate }, tx);
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Update', 'Quotation', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
             return Ok(new { quotationId = id });
@@ -325,6 +345,28 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         });
     }
 
+    /// <summary>Item-wise Hole/B-Hole/Cutout/B-Cutout quantities are summed across every line and
+    /// priced at the document's own rate for that type -- not a per-line rate, since the same
+    /// hole/cutout charge applies uniformly across the whole quotation.</summary>
+    private static decimal HolesCutoutAmount(List<QuotationLineDto> lines, decimal holeRate, decimal bHoleRate, decimal cutoutRate, decimal bCutoutRate) =>
+        lines.Sum(l => l.HoleQty) * holeRate +
+        lines.Sum(l => l.BHoleQty) * bHoleRate +
+        lines.Sum(l => l.CutoutQty) * cutoutRate +
+        lines.Sum(l => l.BCutoutQty) * bCutoutRate;
+
+    private static string? ValidateHolesCutout(List<QuotationLineDto> lines, decimal holeRate, decimal bHoleRate, decimal cutoutRate, decimal bCutoutRate)
+    {
+        if (holeRate < 0 || bHoleRate < 0 || cutoutRate < 0 || bCutoutRate < 0)
+            return "Hole/B-Hole/Cutout/B-Cutout rates cannot be negative.";
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var l = lines[i];
+            if (l.HoleQty < 0 || l.BHoleQty < 0 || l.CutoutQty < 0 || l.BCutoutQty < 0)
+                return $"Line {i + 1}: Hole/B-Hole/Cutout/B-Cutout quantities cannot be negative.";
+        }
+        return null;
+    }
+
     // Thickness defaults from the product master, but a line may override it — Sheet3's THICK
     // column is typed per row (row 116 is 3.2mm, rows 20-25 leave it blank), so it is entered
     // data, not purely a product attribute.
@@ -389,7 +431,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                  ThicknessMm, CalculatedBasicAmount, ChargeableAmount,
                  DiscountPct, DiscountAmount, TaxableAmount, GstPct, GstAmount, Amount,
                  ManualArea, ManualBasicAmount, IsAreaManualOverride, IsAmountManualOverride,
-                 CalculationMethod, CalculationMetadata)
+                 CalculationMethod, CalculationMetadata,
+                 HoleQty, BHoleQty, CutoutQty, BCutoutQty)
               VALUES
                 (@quotationId, @ProductId, @Description, @Qty, @Rate,
                  @Length, @Width, @DimensionUnit, @RateUnit, @ApplyThickness, @ChargeRoundingInch,
@@ -400,7 +443,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                  @ThicknessMm, @CalculatedBasicAmount, @BasicAmount,
                  @DiscountPct, @DiscountAmount, @TaxableAmount, @GstPct, @GstAmount, @FinalAmount,
                  @ManualArea, @ManualBasicAmount, @IsAreaManualOverride, @IsAmountManualOverride,
-                 @CalculationMethod, @metadata)",
+                 @CalculationMethod, @metadata,
+                 @HoleQty, @BHoleQty, @CutoutQty, @BCutoutQty)",
             new
             {
                 quotationId,
@@ -441,6 +485,10 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                 calc.IsAmountManualOverride,
                 calc.CalculationMethod,
                 metadata,
+                l.HoleQty,
+                l.BHoleQty,
+                l.CutoutQty,
+                l.BCutoutQty,
             }, tx);
 
         return calc.FinalAmount;

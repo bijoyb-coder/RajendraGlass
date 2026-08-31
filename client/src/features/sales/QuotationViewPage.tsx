@@ -37,6 +37,7 @@ export default function QuotationViewPage() {
   const discount = q.lines.reduce((s, l) => s + l.discountAmount, 0)
   const gst = q.lines.reduce((s, l) => s + l.gstAmount, 0)
   const anyOverride = q.lines.some((l) => l.isAreaManualOverride || l.isAmountManualOverride)
+  const hasAnyHolesCutout = (q.totalHoleQty ?? 0) > 0 || (q.totalBHoleQty ?? 0) > 0 || (q.totalCutoutQty ?? 0) > 0 || (q.totalBCutoutQty ?? 0) > 0
 
   return (
     <div className="max-w-6xl mx-auto animate-fade-in">
@@ -154,6 +155,17 @@ export default function QuotationViewPage() {
         <div className="flex justify-end mb-6">
           <div className="w-72 space-y-1.5 text-sm">
             <Row label="Basic Amount" value={money(basic)} />
+            {hasAnyHolesCutout && (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 space-y-1">
+                {q.totalHoleQty! > 0 && <Row label={`Hole Qty (${num(q.totalHoleQty!, 2)}) @ ${money(q.holeRate)}`} value={money(q.totalHoleQty! * q.holeRate)} />}
+                {q.totalBHoleQty! > 0 && <Row label={`B-Hole Qty (${num(q.totalBHoleQty!, 2)}) @ ${money(q.bHoleRate)}`} value={money(q.totalBHoleQty! * q.bHoleRate)} />}
+                {q.totalCutoutQty! > 0 && <Row label={`Cutout Qty (${num(q.totalCutoutQty!, 2)}) @ ${money(q.cutoutRate)}`} value={money(q.totalCutoutQty! * q.cutoutRate)} />}
+                {q.totalBCutoutQty! > 0 && <Row label={`B-Cutout Qty (${num(q.totalBCutoutQty!, 2)}) @ ${money(q.bCutoutRate)}`} value={money(q.totalBCutoutQty! * q.bCutoutRate)} />}
+                <div className="flex justify-between font-medium text-slate-700 border-t border-slate-200 pt-1">
+                  <span>Holes &amp; Cutout</span><span>{money(q.holesCutoutAmount ?? 0)}</span>
+                </div>
+              </div>
+            )}
             {discount > 0 && <Row label="Discount" value={`− ${money(discount)}`} />}
             <Row label="GST" value={money(gst)} />
             <Row label="Round Off" value={money(q.roundOff)} />

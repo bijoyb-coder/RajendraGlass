@@ -96,6 +96,12 @@ export interface SalesLine {
   /** null = follow the calculation; a number = operator override. */
   manualArea: number | null;
   manualBasicAmount: number | null;
+  /** Item-wise, all optional (default 0) -- summed across every line and priced at the document's
+   * own hole/cutout rates (see the optional `holesCutout` prop below), not per line. */
+  holeQty: number;
+  bHoleQty: number;
+  cutoutQty: number;
+  bCutoutQty: number;
 }
 
 export const emptyLine = (preset: PresetKey = "SHEET_SQM"): SalesLine => ({
@@ -113,6 +119,10 @@ export const emptyLine = (preset: PresetKey = "SHEET_SQM"): SalesLine => ({
   discountPct: 0,
   manualArea: null,
   manualBasicAmount: null,
+  holeQty: 0,
+  bHoleQty: 0,
+  cutoutQty: 0,
+  bCutoutQty: 0,
   ...PRESETS[preset],
 });
 
@@ -173,6 +183,10 @@ interface SavedLineLike {
   thicknessMm?: number | null
   manualArea?: number | null
   manualBasicAmount?: number | null
+  holeQty?: number | null
+  bHoleQty?: number | null
+  cutoutQty?: number | null
+  bCutoutQty?: number | null
 }
 
 /** Reconstructs an editable line from what the server returned — used to open a saved
@@ -197,6 +211,10 @@ export function fromSavedLine(l: SavedLineLike): SalesLine {
     discountPct: l.discountPct,
     manualArea: l.manualArea ?? null,
     manualBasicAmount: l.manualBasicAmount ?? null,
+    holeQty: l.holeQty ?? 0,
+    bHoleQty: l.bHoleQty ?? 0,
+    cutoutQty: l.cutoutQty ?? 0,
+    bCutoutQty: l.bCutoutQty ?? 0,
   };
 }
 
@@ -217,6 +235,10 @@ export function toCreateLine(l: SalesLine): CreateQuotationLine {
     thicknessMm: l.thicknessMm,
     manualArea: l.manualArea,
     manualBasicAmount: l.manualBasicAmount,
+    holeQty: l.holeQty,
+    bHoleQty: l.bHoleQty,
+    cutoutQty: l.cutoutQty,
+    bCutoutQty: l.bCutoutQty,
   };
 }
 
@@ -274,13 +296,25 @@ export function getLineStockShortage(
   return { required, qtyFree, short: required - qtyFree, unit };
 }
 
+export interface HolesCutoutRates {
+  holeRate: number;
+  bHoleRate: number;
+  cutoutRate: number;
+  bCutoutRate: number;
+  onChange: (patch: Partial<Pick<HolesCutoutRates, "holeRate" | "bHoleRate" | "cutoutRate" | "bCutoutRate">>) => void;
+}
+
 interface Props {
   lines: SalesLine[];
   products?: { items: ProductDto[] };
   onChange: (lines: SalesLine[]) => void;
+  /** Renders the item-wise Hole/B-Hole/Cutout/B-Cutout columns plus the document-level rate
+   * inputs in the totals footer. Omit to hide the whole feature (e.g. Sales Orders, which don't
+   * use it) without duplicating this grid. */
+  holesCutout?: HolesCutoutRates;
 }
 
-export default function SalesLineGrid({ lines, products, onChange }: Props) {
+export default function SalesLineGrid({ lines, products, onChange, holesCutout }: Props) {
   // Free stock across every godown, by product — checked live as a product/qty is entered so a
   // shortage shows before the document is even saved, not discovered at dispatch time.
   const { data: stockSummary } = useStockSummaryQuery();
@@ -319,6 +353,17 @@ export default function SalesLineGrid({ lines, products, onChange }: Props) {
   }
 
   const totals = lineTotals(lines);
+  const totalHoleQty = lines.reduce((s, l) => s + (l.holeQty || 0), 0);
+  const totalBHoleQty = lines.reduce((s, l) => s + (l.bHoleQty || 0), 0);
+  const totalCutoutQty = lines.reduce((s, l) => s + (l.cutoutQty || 0), 0);
+  const totalBCutoutQty = lines.reduce((s, l) => s + (l.bCutoutQty || 0), 0);
+  const holesCutoutAmount = holesCutout
+    ? totalHoleQty * holesCutout.holeRate +
+      totalBHoleQty * holesCutout.bHoleRate +
+      totalCutoutQty * holesCutout.cutoutRate +
+      totalBCutoutQty * holesCutout.bCutoutRate
+    : 0;
+  const hasAnyHolesCutout = totalHoleQty > 0 || totalBHoleQty > 0 || totalCutoutQty > 0 || totalBCutoutQty > 0;
 
   return (
     <>
@@ -338,6 +383,14 @@ export default function SalesLineGrid({ lines, products, onChange }: Props) {
               <th className="py-2 font-medium w-32">Basic Amount</th>
               <th className="py-2 font-medium w-20">Disc %</th>
               <th className="py-2 font-medium w-20">GST %</th>
+              {holesCutout && (
+                <>
+                  <th className="py-2 font-medium w-16">Hole</th>
+                  <th className="py-2 font-medium w-16">B-Hole</th>
+                  <th className="py-2 font-medium w-16">Cutout</th>
+                  <th className="py-2 font-medium w-16">B-Cutout</th>
+                </>
+              )}
               <th className="py-2 font-medium w-32 text-right">Final Amount</th>
               <th className="w-8" />
             </tr>
@@ -621,6 +674,22 @@ export default function SalesLineGrid({ lines, products, onChange }: Props) {
                     />
                   </td>
 
+                  {holesCutout && (
+                    <>
+                      <td className="py-2 pr-2">
+                        <input type="number" min={0} step="0.01" value={l.holeQty || ""} onChange={(e) => updateLine(l.key, { holeQty: Number(e.target.value) })} className={cellInput} />
+                      </td>
+                      <td className="py-2 pr-2">
+                        <input type="number" min={0} step="0.01" value={l.bHoleQty || ""} onChange={(e) => updateLine(l.key, { bHoleQty: Number(e.target.value) })} className={cellInput} />
+                      </td>
+                      <td className="py-2 pr-2">
+                        <input type="number" min={0} step="0.01" value={l.cutoutQty || ""} onChange={(e) => updateLine(l.key, { cutoutQty: Number(e.target.value) })} className={cellInput} />
+                      </td>
+                      <td className="py-2 pr-2">
+                        <input type="number" min={0} step="0.01" value={l.bCutoutQty || ""} onChange={(e) => updateLine(l.key, { bCutoutQty: Number(e.target.value) })} className={cellInput} />
+                      </td>
+                    </>
+                  )}
                   <td className="py-2 pr-2 text-right font-medium text-slate-700">
                     {money(c.finalAmount)}
                     <div className="text-[11px] font-normal text-slate-400">
@@ -655,6 +724,25 @@ export default function SalesLineGrid({ lines, products, onChange }: Props) {
           <div className="text-slate-500">
             Basic: <span className="font-medium text-slate-700">{money(totals.basic)}</span>
           </div>
+          {holesCutout && hasAnyHolesCutout && (
+            <div className="my-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-left text-xs space-y-1">
+              {totalHoleQty > 0 && (
+                <HolesCutoutRow label="Hole" qty={totalHoleQty} rate={holesCutout.holeRate} onRateChange={(v) => holesCutout.onChange({ holeRate: v })} />
+              )}
+              {totalBHoleQty > 0 && (
+                <HolesCutoutRow label="B-Hole" qty={totalBHoleQty} rate={holesCutout.bHoleRate} onRateChange={(v) => holesCutout.onChange({ bHoleRate: v })} />
+              )}
+              {totalCutoutQty > 0 && (
+                <HolesCutoutRow label="Cutout" qty={totalCutoutQty} rate={holesCutout.cutoutRate} onRateChange={(v) => holesCutout.onChange({ cutoutRate: v })} />
+              )}
+              {totalBCutoutQty > 0 && (
+                <HolesCutoutRow label="B-Cutout" qty={totalBCutoutQty} rate={holesCutout.bCutoutRate} onRateChange={(v) => holesCutout.onChange({ bCutoutRate: v })} />
+              )}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-200 font-medium text-slate-700">
+                <span>Holes &amp; Cutout</span><span>{money(holesCutoutAmount)}</span>
+              </div>
+            </div>
+          )}
           {totals.discount > 0 && (
             <div className="text-slate-500">
               Discount: <span className="font-medium text-slate-700">− {money(totals.discount)}</span>
@@ -664,10 +752,29 @@ export default function SalesLineGrid({ lines, products, onChange }: Props) {
             GST: <span className="font-medium text-slate-700">{money(totals.gst)}</span>
           </div>
           <div className="text-base font-bold text-brand-900 mt-0.5">
-            Total: {money(totals.amount)}
+            Total: {money(totals.amount + holesCutoutAmount)}
           </div>
         </div>
       </div>
     </>
+  );
+}
+
+function HolesCutoutRow({ label, qty, rate, onRateChange }: { label: string; qty: number; rate: number; onRateChange: (v: number) => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2 text-slate-600">
+      <span>{label} Qty: {num(qty, 2)}</span>
+      <span className="inline-flex items-center gap-1">
+        Rate
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          value={rate || ""}
+          onChange={(e) => onRateChange(Number(e.target.value))}
+          className="w-20 rounded border border-slate-300 px-1.5 py-0.5 text-xs text-right focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
+        />
+      </span>
+    </div>
   );
 }

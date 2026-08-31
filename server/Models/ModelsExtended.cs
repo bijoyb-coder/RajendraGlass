@@ -635,6 +635,12 @@ public class QuotationLineDto
     public decimal? ManualArea { get; set; }
     /// <summary>Set to bill an amount other than the computed one; wins over everything else.</summary>
     public decimal? ManualBasicAmount { get; set; }
+    /// <summary>Item-wise, all optional (default 0). Summed across every line and priced at the
+    /// document's own hole/cutout rates (see QuotationDto.HoleRate etc.) — not per line.</summary>
+    public decimal HoleQty { get; set; }
+    public decimal BHoleQty { get; set; }
+    public decimal CutoutQty { get; set; }
+    public decimal BCutoutQty { get; set; }
 
     // ----- server-calculated -----
     public decimal LengthInch { get; set; }
@@ -677,6 +683,21 @@ public class QuotationDto
     /// <summary>True while no sales order has been generated against this quotation — the same
     /// condition the server re-checks in DELETE (see QuotationsController.Delete).</summary>
     public bool CanDelete { get; set; }
+    /// <summary>One rate per hole/cutout type, entered once for the whole document (not per line)
+    /// and applied to the sum of every line's qty for that type. All default 0.</summary>
+    public decimal HoleRate { get; set; }
+    public decimal BHoleRate { get; set; }
+    public decimal CutoutRate { get; set; }
+    public decimal BCutoutRate { get; set; }
+    /// <summary>Computed from the lines, populated only by Get(id) — List() leaves these at 0.</summary>
+    public decimal TotalHoleQty { get; set; }
+    public decimal TotalBHoleQty { get; set; }
+    public decimal TotalCutoutQty { get; set; }
+    public decimal TotalBCutoutQty { get; set; }
+    /// <summary>= TotalHoleQty*HoleRate + TotalBHoleQty*BHoleRate + TotalCutoutQty*CutoutRate +
+    /// TotalBCutoutQty*BCutoutRate -- folded into TotalValue (added to the basic amount before
+    /// rounding) at save time, same figure this property reports back.</summary>
+    public decimal HolesCutoutAmount { get; set; }
     public List<QuotationLineDto> Lines { get; set; } = new();
 }
 
@@ -687,6 +708,11 @@ public class CreateQuotationRequest
     /// <summary>Lets a quotation be raised for a walk-in customer without leaving the screen.</summary>
     public NewCustomerRequest? NewCustomer { get; set; }
     public DateTime? ValidUntil { get; set; }
+    /// <summary>One rate per hole/cutout type, applied to the sum of every line's qty for that type.</summary>
+    public decimal HoleRate { get; set; }
+    public decimal BHoleRate { get; set; }
+    public decimal CutoutRate { get; set; }
+    public decimal BCutoutRate { get; set; }
     public List<QuotationLineDto> Lines { get; set; } = new();
 }
 
@@ -698,6 +724,10 @@ public class UpdateQuotationRequest
 {
     public int CustomerId { get; set; }
     public DateTime? ValidUntil { get; set; }
+    public decimal HoleRate { get; set; }
+    public decimal BHoleRate { get; set; }
+    public decimal CutoutRate { get; set; }
+    public decimal BCutoutRate { get; set; }
     public List<QuotationLineDto> Lines { get; set; } = new();
 }
 
