@@ -1200,6 +1200,24 @@ public class SalesRegisterRow
     public decimal TotalValue { get; set; }
 }
 
+/// <summary>One row of money actually collected from a customer -- every Finance.Voucher with
+/// VoucherType='Receipt', whether entered from the general Vouchers screen or from Payment
+/// Transactions (both write into the same table).</summary>
+public class CollectionRegisterRow
+{
+    public int VoucherId { get; set; }
+    public string? VoucherNo { get; set; }
+    public DateTime VoucherDate { get; set; }
+    public int? CustomerId { get; set; }
+    public string? CustomerName { get; set; }
+    public string? InvoiceNo { get; set; }
+    /// <summary>Cash | Bank | Cheque | UPI.</summary>
+    public string Mode { get; set; } = "";
+    public string? ReferenceNo { get; set; }
+    public decimal Amount { get; set; }
+    public string? Narration { get; set; }
+}
+
 // ---------- Cutting Entry (Quotation -> Cutting) ----------
 
 /// <summary>One line of a Quotation, as offered to the Cutting Entry product picker -- deliberately

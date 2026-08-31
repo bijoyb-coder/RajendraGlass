@@ -744,6 +744,17 @@ export interface MarkAttendanceRequest { employeeId: number; attendanceDate: str
 export interface StockSummaryReportRow { productId: number; productCode: string; description: string; qtyOnHand: number; qtyFree: number; avgRate?: number | null; stockValue: number }
 export interface SalesRegisterRow { invoiceNo: string; invoiceDate: string; customerName: string; taxableValue: number; taxValue: number; totalValue: number }
 
+/** Every Finance.Voucher with VoucherType='Receipt' -- money actually collected from a customer,
+ * whether entered from the general Vouchers screen or Payment Transactions. */
+export interface CollectionRegisterRow {
+  voucherId: number; voucherNo?: string | null; voucherDate: string
+  customerId?: number | null; customerName?: string | null
+  invoiceNo?: string | null
+  /** Cash | Bank | Cheque | UPI. */
+  mode: string
+  referenceNo?: string | null; amount: number; narration?: string | null
+}
+
 export interface GodownStockSummaryRow {
   godownId: number; godownName?: string | null; productCode?: string | null; productDescription?: string | null
   qtyOnHand: number; qtyFree: number; unit?: string | null
