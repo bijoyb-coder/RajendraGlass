@@ -111,6 +111,9 @@ export default function QuotationsPage() {
   const [bHoleRate, setBHoleRate] = useState(0);
   const [cutoutRate, setCutoutRate] = useState(0);
   const [bCutoutRate, setBCutoutRate] = useState(0);
+  // Document-level "round to the nearest rupee" toggle -- not per line. Defaults on, matching
+  // the auto-rounding this page always did before this became a visible choice.
+  const [roundOffEnabled, setRoundOffEnabled] = useState(true);
 
   // ---------- Data grid: search + sort over the fetched list ----------
   const {
@@ -157,6 +160,7 @@ export default function QuotationsPage() {
     setBHoleRate(0);
     setCutoutRate(0);
     setBCutoutRate(0);
+    setRoundOffEnabled(true);
   }
 
   function openNewForm() {
@@ -174,6 +178,7 @@ export default function QuotationsPage() {
     setBHoleRate(full.bHoleRate);
     setCutoutRate(full.cutoutRate);
     setBCutoutRate(full.bCutoutRate);
+    setRoundOffEnabled(full.roundOffEnabled);
     setShowForm(true);
   }
 
@@ -201,11 +206,6 @@ export default function QuotationsPage() {
       );
       return;
     }
-    const badGst = valid.find((l) => l.gstPct < 0 || l.gstPct > 100);
-    if (badGst) {
-      alertError("Invalid GST %", "GST % must be between 0 and 100.");
-      return;
-    }
     const badDisc = valid.find((l) => l.discountPct < 0 || l.discountPct > 100);
     if (badDisc) {
       alertError("Invalid discount %", "Discount % must be between 0 and 100.");
@@ -231,11 +231,13 @@ export default function QuotationsPage() {
     }
 
     try {
-      const payload: CreateQuotationLine[] = valid.map(toCreateLine);
+      // Quotations don't carry GST -- every line is sent with gstPct forced to 0 regardless of
+      // whatever value it happens to hold (e.g. a legacy quotation loaded for edit).
+      const payload: CreateQuotationLine[] = valid.map(toCreateLine).map((l) => ({ ...l, gstPct: 0 }));
       if (editingId) {
         await updateQuotation({
           id: editingId,
-          body: { customerId: Number(customerId), lines: payload, holeRate, bHoleRate, cutoutRate, bCutoutRate },
+          body: { customerId: Number(customerId), lines: payload, holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled },
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -248,6 +250,7 @@ export default function QuotationsPage() {
           bHoleRate,
           cutoutRate,
           bCutoutRate,
+          roundOffEnabled,
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -275,8 +278,10 @@ export default function QuotationsPage() {
   ) {
     try {
       const full = await fetchQuotation(quotationId).unwrap();
-      // Carry the whole line across — size, unit, rate basis, thickness, GST, discount and any
-      // override — so the order prices to the same figure as the quotation it came from.
+      // Carry the whole line across — size, unit, rate basis, thickness, discount and any
+      // override — so the order prices to the same figure as the quotation it came from. Every
+      // quotation line carries gstPct=0 (quotations don't have GST), so the resulting order
+      // starts GST-free too; edit it there if the order itself needs GST.
       const qLines: CreateQuotationLine[] = full.lines.map((l) => toCreateLine(fromSavedLine(l)));
       await createSalesOrder({
         customerId: customerIdForOrder,
@@ -462,6 +467,8 @@ export default function QuotationsPage() {
             lines={lines}
             products={products}
             onChange={setLines}
+            showGst={false}
+            roundOff={{ enabled: roundOffEnabled, onChange: setRoundOffEnabled }}
             holesCutout={{
               holeRate,
               bHoleRate,

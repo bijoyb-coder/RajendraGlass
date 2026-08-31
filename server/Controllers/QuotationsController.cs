@@ -78,7 +78,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             @"SELECT q.QuotationId, q.QuotationNo, q.CustomerId, c.Name AS CustomerName,
                      c.CustomerType, c.BillingAddress AS CustomerAddress, c.Gstin AS CustomerGstin,
                      c.Mobile AS CustomerMobile, c.StateName AS CustomerStateName,
-                     q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue, q.RoundOff,
+                     q.QuotationDate, q.ValidUntil, q.Status, q.TotalValue, q.RoundOff, q.RoundOffEnabled,
                      q.HoleRate, q.BHoleRate, q.CutoutRate, q.BCutoutRate,
                      CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM Sales.SalesOrder o WHERE o.QuotationId = q.QuotationId) THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Sales.Quotation q JOIN Master.Customer c ON c.CustomerId = q.CustomerId WHERE q.QuotationId = @id", new { id });
@@ -140,6 +140,10 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         var holesCutoutProblem = ValidateHolesCutout(req.Lines, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate);
         if (holesCutoutProblem is not null) return Invalid("Holes / Cutout", holesCutoutProblem);
 
+        // Quotations don't carry GST -- enforced here, not just hidden client-side, so a direct
+        // API call can't smuggle a nonzero rate in.
+        foreach (var l in req.Lines) l.GstPct = 0;
+
         // Server-side validation: the frontend validates for a fast response, but the server
         // must never accept a line it cannot price correctly.
         for (int i = 0; i < req.Lines.Count; i++)
@@ -188,9 +192,9 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
 
             decimal total = 0;
             var id = conn.ExecuteScalar<int>(
-                @"INSERT INTO Sales.Quotation (QuotationNo, CustomerId, BranchId, ValidUntil, Status, TotalValue, HoleRate, BHoleRate, CutoutRate, BCutoutRate)
-                  OUTPUT INSERTED.QuotationId VALUES (@qNo, @customerId, @branchId, @ValidUntil, 'Sent', 0, @HoleRate, @BHoleRate, @CutoutRate, @BCutoutRate)",
-                new { qNo, customerId, branchId, req.ValidUntil, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate }, tx);
+                @"INSERT INTO Sales.Quotation (QuotationNo, CustomerId, BranchId, ValidUntil, Status, TotalValue, HoleRate, BHoleRate, CutoutRate, BCutoutRate, RoundOffEnabled)
+                  OUTPUT INSERTED.QuotationId VALUES (@qNo, @customerId, @branchId, @ValidUntil, 'Sent', 0, @HoleRate, @BHoleRate, @CutoutRate, @BCutoutRate, @RoundOffEnabled)",
+                new { qNo, customerId, branchId, req.ValidUntil, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate, req.RoundOffEnabled }, tx);
 
             var thicknessByProduct = ThicknessByProduct(conn, tx, req.Lines);
             foreach (var l in req.Lines)
@@ -201,9 +205,10 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             // amount, before the round-to-nearest-rupee step below.
             total += HolesCutoutAmount(req.Lines, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate);
 
-            // Total is always rounded to the nearest whole rupee, same convention Invoice already
-            // uses; the delta is kept in RoundOff so the printed total reconciles with the lines.
-            decimal rounded = Math.Round(total, 0, MidpointRounding.AwayFromZero);
+            // Rounded to the nearest whole rupee only while the operator's Round Off checkbox is
+            // on (same convention Invoice always applies); the delta is kept in RoundOff so the
+            // printed total reconciles with the lines either way.
+            decimal rounded = req.RoundOffEnabled ? Math.Round(total, 0, MidpointRounding.AwayFromZero) : Math.Round(total, 2, MidpointRounding.AwayFromZero);
             decimal roundOff = rounded - total;
             conn.Execute("UPDATE Sales.Quotation SET TotalValue = @rounded, RoundOff = @roundOff WHERE QuotationId = @id", new { rounded, roundOff, id }, tx);
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'Quotation', @id)", new { id = id.ToString() }, tx);
@@ -227,6 +232,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             return UnprocessableEntity(new ProblemResponse { Title = "No customer", Status = 422, ErrorCode = "CUSTOMER_REQUIRED", Detail = "Select a customer." });
         var holesCutoutProblem = ValidateHolesCutout(req.Lines, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate);
         if (holesCutoutProblem is not null) return Invalid("Holes / Cutout", holesCutoutProblem);
+        foreach (var l in req.Lines) l.GstPct = 0;
 
         for (int i = 0; i < req.Lines.Count; i++)
         {
@@ -260,13 +266,13 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                 total += InsertLine(conn, tx, id, l, thicknessByProduct);
             total += HolesCutoutAmount(req.Lines, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate);
 
-            decimal rounded = Math.Round(total, 0, MidpointRounding.AwayFromZero);
+            decimal rounded = req.RoundOffEnabled ? Math.Round(total, 0, MidpointRounding.AwayFromZero) : Math.Round(total, 2, MidpointRounding.AwayFromZero);
             decimal roundOff = rounded - total;
             conn.Execute(
                 @"UPDATE Sales.Quotation SET CustomerId = @CustomerId, ValidUntil = @ValidUntil, TotalValue = @rounded, RoundOff = @roundOff,
-                         HoleRate = @HoleRate, BHoleRate = @BHoleRate, CutoutRate = @CutoutRate, BCutoutRate = @BCutoutRate
+                         HoleRate = @HoleRate, BHoleRate = @BHoleRate, CutoutRate = @CutoutRate, BCutoutRate = @BCutoutRate, RoundOffEnabled = @RoundOffEnabled
                   WHERE QuotationId = @id",
-                new { req.CustomerId, req.ValidUntil, rounded, roundOff, id, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate }, tx);
+                new { req.CustomerId, req.ValidUntil, rounded, roundOff, id, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate, req.RoundOffEnabled }, tx);
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Update', 'Quotation', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
             return Ok(new { quotationId = id });
