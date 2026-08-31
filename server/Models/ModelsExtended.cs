@@ -183,6 +183,9 @@ public class StockOpeningLineDto
     public int ProductId { get; set; }
     public string? ProductCode { get; set; }
     public decimal Qty { get; set; }
+    /// <summary>Entered by the user, not derived from Qty/StockUnit -- e.g. a physical measurement
+    /// or a figure carried over from a paper record.</summary>
+    public decimal AreaSqm { get; set; }
 }
 
 /// <summary>An inbound-only entry recording the opening balance of a product at a godown -- e.g.
@@ -205,6 +208,8 @@ public class CreateStockOpeningLineRequest
 {
     public int ProductId { get; set; }
     public decimal Qty { get; set; }
+    /// <summary>Entered by the user, not derived from Qty/StockUnit.</summary>
+    public decimal AreaSqm { get; set; }
 }
 
 public class CreateStockOpeningRequest
