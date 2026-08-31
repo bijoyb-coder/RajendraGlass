@@ -427,6 +427,9 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
         var badLine = req.Lines.FirstOrDefault(l => l.Qty <= 0);
         if (badLine is not null)
             return UnprocessableEntity(new ProblemResponse { Title = "Invalid quantity", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = "Opening quantity must be greater than zero for every line." });
+        var badArea = req.Lines.FirstOrDefault(l => l.AreaSqm <= 0);
+        if (badArea is not null)
+            return UnprocessableEntity(new ProblemResponse { Title = "Invalid area", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = "Area (SQM) must be greater than zero for every line." });
 
         using var conn = db.CreateConnection();
         using var tx = conn.BeginTransaction();
@@ -443,8 +446,8 @@ public class InventoryController(IDbConnectionFactory db) : ControllerBase
             foreach (var line in req.Lines)
             {
                 conn.Execute(
-                    "INSERT INTO Inventory.StockOpeningLine (StockOpeningId, ProductId, Qty) VALUES (@openingId, @ProductId, @Qty)",
-                    new { openingId, line.ProductId, line.Qty }, tx);
+                    "INSERT INTO Inventory.StockOpeningLine (StockOpeningId, ProductId, Qty, AreaSqm) VALUES (@openingId, @ProductId, @Qty, @AreaSqm)",
+                    new { openingId, line.ProductId, line.Qty, line.AreaSqm }, tx);
 
                 var balance = conn.QueryFirstOrDefault(
                     "SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",

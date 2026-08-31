@@ -258,7 +258,7 @@ export interface StockBalanceDto {
 }
 
 export interface StockAdjustmentLineDto { productId: number; productCode?: string | null; bookQty: number; actualQty: number; difference: number }
-export interface StockOpeningLineDto { productId: number; productCode?: string | null; qty: number }
+export interface StockOpeningLineDto { productId: number; productCode?: string | null; qty: number; areaSqm: number }
 /** Inbound-only -- unlike Stock Adjustment (sets book qty to a counted actual, can move either
  * way), Stock Opening always adds the entered quantity, the same way a Purchase/GRN does. */
 export interface StockOpeningDto {
@@ -266,7 +266,7 @@ export interface StockOpeningDto {
   openingDate: string; status: string; remarks?: string | null; lines: StockOpeningLineDto[]
   canDelete: boolean
 }
-export interface CreateStockOpeningRequest { godownId: number; remarks?: string; lines: { productId: number; qty: number }[] }
+export interface CreateStockOpeningRequest { godownId: number; remarks?: string; lines: { productId: number; qty: number; areaSqm: number }[] }
 
 export interface StockAdjustmentDto {
   stockAdjustmentId: number; adjustmentNo?: string | null; godownId: number; godownName?: string | null

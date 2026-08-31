@@ -18,7 +18,7 @@ import type { StockOpeningDto } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
 
-interface Line { key: string; productId: number; qty: number }
+interface Line { key: string; productId: number; qty: number; areaSqm: number }
 
 type SortKey = 'openingNo' | 'openingDate' | 'godownName' | 'status'
 
@@ -36,7 +36,7 @@ export default function StockOpeningPage() {
   const [showForm, setShowForm] = useState(false)
   const [godownId, setGodownId] = useState<number | ''>('')
   const [remarks, setRemarks] = useState('')
-  const [lines, setLines] = useState<Line[]>([{ key: crypto.randomUUID(), productId: 0, qty: 0 }])
+  const [lines, setLines] = useState<Line[]>([{ key: crypto.randomUUID(), productId: 0, qty: 0, areaSqm: 0 }])
   const [error, setError] = useState<string | null>(null)
 
   const {
@@ -70,7 +70,7 @@ export default function StockOpeningPage() {
       o.status.toLowerCase().includes(term),
   })
 
-  function addLine() { setLines((p) => [...p, { key: crypto.randomUUID(), productId: 0, qty: 0 }]) }
+  function addLine() { setLines((p) => [...p, { key: crypto.randomUUID(), productId: 0, qty: 0, areaSqm: 0 }]) }
   function removeLine(key: string) { setLines((p) => p.filter((l) => l.key !== key)) }
   function updateLine(key: string, patch: Partial<Line>) { setLines((p) => p.map((l) => (l.key === key ? { ...l, ...patch } : l))) }
 
@@ -78,12 +78,12 @@ export default function StockOpeningPage() {
     e.preventDefault()
     setError(null)
     if (!godownId) { setError('Select a godown.'); return }
-    const valid = lines.filter((l) => l.productId && l.qty > 0)
-    if (valid.length === 0) { setError('Add at least one product with an opening quantity greater than zero.'); return }
+    const valid = lines.filter((l) => l.productId && l.qty > 0 && l.areaSqm > 0)
+    if (valid.length === 0) { setError('Add at least one product with an opening quantity and area (SQM) greater than zero.'); return }
     try {
-      await createOpening({ godownId: Number(godownId), remarks: remarks || undefined, lines: valid.map(({ productId, qty }) => ({ productId, qty })) }).unwrap()
+      await createOpening({ godownId: Number(godownId), remarks: remarks || undefined, lines: valid.map(({ productId, qty, areaSqm }) => ({ productId, qty, areaSqm })) }).unwrap()
       setShowForm(false)
-      setLines([{ key: crypto.randomUUID(), productId: 0, qty: 0 }])
+      setLines([{ key: crypto.randomUUID(), productId: 0, qty: 0, areaSqm: 0 }])
       setRemarks('')
     } catch (err: any) {
       setError(err?.data?.detail ?? 'Could not save the opening balance.')
@@ -123,6 +123,7 @@ export default function StockOpeningPage() {
               <tr className="text-left text-xs uppercase tracking-wide text-slate-400 border-b border-slate-100">
                 <th className="py-2 font-medium">Product</th>
                 <th className="py-2 font-medium w-40">Opening Qty</th>
+                <th className="py-2 font-medium w-40">Area (SQM)</th>
                 <th className="w-10" />
               </tr>
             </thead>
@@ -137,6 +138,9 @@ export default function StockOpeningPage() {
                   </td>
                   <td className="py-2 pr-2">
                     <input type="number" min={0} step="0.001" value={l.qty || ''} onChange={(e) => updateLine(l.key, { qty: Number(e.target.value) })} className={inputClass} />
+                  </td>
+                  <td className="py-2 pr-2">
+                    <input type="number" min={0} step="0.001" value={l.areaSqm || ''} onChange={(e) => updateLine(l.key, { areaSqm: Number(e.target.value) })} className={inputClass} />
                   </td>
                   <td>
                     <button type="button" onClick={() => removeLine(l.key)} className="text-slate-400 hover:text-red-500 transition"><Trash2 size={15} /></button>
