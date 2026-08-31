@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Plus,
   X,
@@ -85,8 +85,25 @@ function isEditable(status: string) {
 
 type SortKey = "quotationNo" | "quotationDate" | "customerName" | "totalValue" | "status";
 
+/** Everything needed to put the in-progress form back exactly as it was, carried across the
+ * navigation to Product Master and back via router state (see handleAddNewProduct). */
+interface QuotationDraft {
+  editingId: number | null;
+  customerId: number | "";
+  newCustomerMode: boolean;
+  newCustomer: NewCustomerRequest;
+  lines: SalesLine[];
+  description: string;
+  holeRate: number;
+  bHoleRate: number;
+  cutoutRate: number;
+  bCutoutRate: number;
+  roundOffEnabled: boolean;
+}
+
 export default function QuotationsPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data, isLoading } = useListQuotationsQuery();
   const { data: customers } = useListCustomersQuery();
   const { data: products } = useListProductsQuery();
@@ -105,6 +122,9 @@ export default function QuotationsPage() {
   const [newCustomer, setNewCustomer] =
     useState<NewCustomerRequest>(emptyNewCustomer);
   const [lines, setLines] = useState<SalesLine[]>([emptyLine()]);
+  // One free-text field for the whole quotation -- not per line (see SalesLineGrid's
+  // showItemDescription={false} below).
+  const [description, setDescription] = useState("");
   // One rate per hole/cutout type, entered once for the whole document -- not per line. Applied
   // to the sum of every line's own item-wise Hole/B-Hole/Cutout/B-Cutout quantity.
   const [holeRate, setHoleRate] = useState(0);
@@ -114,6 +134,67 @@ export default function QuotationsPage() {
   // Document-level "round to the nearest rupee" toggle -- not per line. Defaults on, matching
   // the auto-rounding this page always did before this became a visible choice.
   const [roundOffEnabled, setRoundOffEnabled] = useState(true);
+  // Set right after restoring a draft that came back from "+ Add New Product…" -- names the line
+  // waiting to receive the product once useListProductsQuery's cache (invalidated by the create)
+  // has actually refetched and includes it.
+  const [pendingNewProduct, setPendingNewProduct] = useState<{ lineKey: string; productId: number } | null>(null);
+
+  // Coming back from Product Master after "+ Add New Product…": restore the form exactly as it
+  // was, then queue the new product to be dropped into the line that asked for it (see the effect
+  // below, which waits for the product list to actually include it).
+  useEffect(() => {
+    const state = location.state as { restoreDraft?: QuotationDraft; targetLineKey?: string; newProductId?: number } | null;
+    if (!state?.restoreDraft) return;
+    const draft = state.restoreDraft;
+    setEditingId(draft.editingId);
+    setCustomerId(draft.customerId);
+    setNewCustomerMode(draft.newCustomerMode);
+    setNewCustomer(draft.newCustomer);
+    setLines(draft.lines);
+    setDescription(draft.description);
+    setHoleRate(draft.holeRate);
+    setBHoleRate(draft.bHoleRate);
+    setCutoutRate(draft.cutoutRate);
+    setBCutoutRate(draft.bCutoutRate);
+    setRoundOffEnabled(draft.roundOffEnabled);
+    setShowForm(true);
+    if (state.targetLineKey && state.newProductId) {
+      setPendingNewProduct({ lineKey: state.targetLineKey, productId: state.newProductId });
+    }
+    // Consume the navigation state so refreshing or navigating back doesn't replay this restore.
+    navigate(location.pathname, { replace: true, state: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Once the newly created product actually shows up in the product list (its cache is
+  // invalidated by the create, but the refetch is async), select it into the waiting line the
+  // same way picking it from the dropdown would -- rate and thickness prefilled from the master.
+  useEffect(() => {
+    if (!pendingNewProduct || !products) return;
+    const product = products.items.find((p) => p.productId === pendingNewProduct.productId);
+    if (!product) return;
+    setLines((prev) =>
+      prev.map((l) =>
+        l.key === pendingNewProduct.lineKey
+          ? { ...l, productId: product.productId, rate: product.sellingRate ?? 0, thicknessMm: product.thicknessMm ?? 0 }
+          : l,
+      ),
+    );
+    setPendingNewProduct(null);
+  }, [products, pendingNewProduct]);
+
+  /** "+ Add New Product…" picked in a line's product dropdown: stash everything typed so far and
+   * navigate to Product Master. Saving a product there returns here (see the effect above) with
+   * the same data restored and the new product selected into this exact line. Navigating to
+   * Product Master any other way (the main menu) never carries this state, so it behaves exactly
+   * as it always has -- no redirect back here. */
+  function handleAddNewProduct(lineKey: string) {
+    const draft: QuotationDraft = {
+      editingId, customerId, newCustomerMode, newCustomer, lines, description,
+      holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled,
+    };
+    navigate("/masters/products", { state: { returnTo: "quotation", targetLineKey: lineKey, draft } });
+  }
 
   // ---------- Data grid: search + sort over the fetched list ----------
   const {
@@ -153,6 +234,7 @@ export default function QuotationsPage() {
   function resetForm() {
     setEditingId(null);
     setLines([emptyLine()]);
+    setDescription("");
     setCustomerId("");
     setNewCustomerMode(false);
     setNewCustomer(emptyNewCustomer);
@@ -174,6 +256,7 @@ export default function QuotationsPage() {
     setCustomerId(full.customerId);
     setNewCustomerMode(false);
     setLines(full.lines.length ? full.lines.map(fromSavedLine) : [emptyLine()]);
+    setDescription(full.description ?? "");
     setHoleRate(full.holeRate);
     setBHoleRate(full.bHoleRate);
     setCutoutRate(full.cutoutRate);
@@ -237,7 +320,7 @@ export default function QuotationsPage() {
       if (editingId) {
         await updateQuotation({
           id: editingId,
-          body: { customerId: Number(customerId), lines: payload, holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled },
+          body: { customerId: Number(customerId), lines: payload, description, holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled },
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -246,6 +329,7 @@ export default function QuotationsPage() {
           customerId: newCustomerMode ? 0 : Number(customerId),
           newCustomer: newCustomerMode ? newCustomer : undefined,
           lines: payload,
+          description,
           holeRate,
           bHoleRate,
           cutoutRate,
@@ -461,6 +545,22 @@ export default function QuotationsPage() {
             </div>
           )}
 
+          {/* ---------- Description ---------- */}
+          {/* One field for the whole quotation, not per line -- see showItemDescription={false}
+              on the grid below. */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">
+              Description
+            </label>
+            <textarea
+              rows={3}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Notes for this quotation…"
+              className={inputClass}
+            />
+          </div>
+
           {/* ---------- Lines ---------- */}
           {/* Shared with the Sales Order screen so the two can never drift apart. */}
           <SalesLineGrid
@@ -468,6 +568,8 @@ export default function QuotationsPage() {
             products={products}
             onChange={setLines}
             showGst={false}
+            showItemDescription={false}
+            onAddNewProduct={handleAddNewProduct}
             roundOff={{ enabled: roundOffEnabled, onChange: setRoundOffEnabled }}
             holesCutout={{
               holeRate,

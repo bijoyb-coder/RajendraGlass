@@ -88,6 +88,13 @@ export default function QuotationViewPage() {
           <Detail label="Status" value={q.status} />
         </div>
 
+        {q.description && (
+          <div className="mb-6 text-sm">
+            <p className="text-xs font-semibold text-slate-400 uppercase mb-1">Description</p>
+            <p className="text-slate-700 whitespace-pre-wrap">{q.description}</p>
+          </div>
+        )}
+
         <div className="overflow-x-auto">
           <table className="w-full text-sm mb-6">
             <thead>

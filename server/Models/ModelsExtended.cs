@@ -677,6 +677,9 @@ public class QuotationDto
     public DateTime QuotationDate { get; set; }
     public DateTime? ValidUntil { get; set; }
     public string Status { get; set; } = "Draft";
+    /// <summary>Document-level notes for the whole quotation -- not per line (see
+    /// Sales.QuotationLine.Description, which new saves leave null going forward).</summary>
+    public string? Description { get; set; }
     /// <summary>Rounded to the nearest whole rupee only while <see cref="RoundOffEnabled"/>; the
     /// delta is <see cref="RoundOff"/>.</summary>
     public decimal TotalValue { get; set; }
@@ -711,6 +714,8 @@ public class CreateQuotationRequest
     /// <summary>Lets a quotation be raised for a walk-in customer without leaving the screen.</summary>
     public NewCustomerRequest? NewCustomer { get; set; }
     public DateTime? ValidUntil { get; set; }
+    /// <summary>Document-level notes for the whole quotation -- not per line.</summary>
+    public string? Description { get; set; }
     /// <summary>One rate per hole/cutout type, applied to the sum of every line's qty for that type.</summary>
     public decimal HoleRate { get; set; }
     public decimal BHoleRate { get; set; }
@@ -729,6 +734,7 @@ public class UpdateQuotationRequest
 {
     public int CustomerId { get; set; }
     public DateTime? ValidUntil { get; set; }
+    public string? Description { get; set; }
     public decimal HoleRate { get; set; }
     public decimal BHoleRate { get; set; }
     public decimal CutoutRate { get; set; }
