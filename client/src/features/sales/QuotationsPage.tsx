@@ -105,6 +105,12 @@ export default function QuotationsPage() {
   const [newCustomer, setNewCustomer] =
     useState<NewCustomerRequest>(emptyNewCustomer);
   const [lines, setLines] = useState<SalesLine[]>([emptyLine()]);
+  // One rate per hole/cutout type, entered once for the whole document -- not per line. Applied
+  // to the sum of every line's own item-wise Hole/B-Hole/Cutout/B-Cutout quantity.
+  const [holeRate, setHoleRate] = useState(0);
+  const [bHoleRate, setBHoleRate] = useState(0);
+  const [cutoutRate, setCutoutRate] = useState(0);
+  const [bCutoutRate, setBCutoutRate] = useState(0);
 
   // ---------- Data grid: search + sort over the fetched list ----------
   const {
@@ -147,6 +153,10 @@ export default function QuotationsPage() {
     setCustomerId("");
     setNewCustomerMode(false);
     setNewCustomer(emptyNewCustomer);
+    setHoleRate(0);
+    setBHoleRate(0);
+    setCutoutRate(0);
+    setBCutoutRate(0);
   }
 
   function openNewForm() {
@@ -160,6 +170,10 @@ export default function QuotationsPage() {
     setCustomerId(full.customerId);
     setNewCustomerMode(false);
     setLines(full.lines.length ? full.lines.map(fromSavedLine) : [emptyLine()]);
+    setHoleRate(full.holeRate);
+    setBHoleRate(full.bHoleRate);
+    setCutoutRate(full.cutoutRate);
+    setBCutoutRate(full.bCutoutRate);
     setShowForm(true);
   }
 
@@ -221,7 +235,7 @@ export default function QuotationsPage() {
       if (editingId) {
         await updateQuotation({
           id: editingId,
-          body: { customerId: Number(customerId), lines: payload },
+          body: { customerId: Number(customerId), lines: payload, holeRate, bHoleRate, cutoutRate, bCutoutRate },
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -230,6 +244,10 @@ export default function QuotationsPage() {
           customerId: newCustomerMode ? 0 : Number(customerId),
           newCustomer: newCustomerMode ? newCustomer : undefined,
           lines: payload,
+          holeRate,
+          bHoleRate,
+          cutoutRate,
+          bCutoutRate,
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -440,7 +458,23 @@ export default function QuotationsPage() {
 
           {/* ---------- Lines ---------- */}
           {/* Shared with the Sales Order screen so the two can never drift apart. */}
-          <SalesLineGrid lines={lines} products={products} onChange={setLines} />
+          <SalesLineGrid
+            lines={lines}
+            products={products}
+            onChange={setLines}
+            holesCutout={{
+              holeRate,
+              bHoleRate,
+              cutoutRate,
+              bCutoutRate,
+              onChange: (patch) => {
+                if (patch.holeRate !== undefined) setHoleRate(patch.holeRate);
+                if (patch.bHoleRate !== undefined) setBHoleRate(patch.bHoleRate);
+                if (patch.cutoutRate !== undefined) setCutoutRate(patch.cutoutRate);
+                if (patch.bCutoutRate !== undefined) setBCutoutRate(patch.bCutoutRate);
+              },
+            }}
+          />
 
           <div className="flex justify-end gap-2">
             {editingId && (

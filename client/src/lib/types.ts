@@ -504,6 +504,9 @@ export interface QuotationLineDto {
   applyThickness: boolean; chargeRoundingInch: number
   gstPct: number; discountPct: number
   manualArea?: number | null; manualBasicAmount?: number | null
+  /** Item-wise, all optional (default 0). Summed across every line and priced at the document's
+   * own hole/cutout rates — see QuotationDto.holeRate etc. — not per line. */
+  holeQty: number; bHoleQty: number; cutoutQty: number; bCutoutQty: number
 
   // Server-calculated (see server/Data/QuotationCalculator.cs) — never sent by the client.
   thicknessMm?: number | null
@@ -527,6 +530,14 @@ export interface QuotationDto {
   totalValue: number; roundOff: number
   /** True while no sales order has been generated against this quotation. */
   canDelete: boolean
+  /** One rate per hole/cutout type, entered once for the whole document (not per line) and
+   * applied to the sum of every line's qty for that type. All default 0. */
+  holeRate: number; bHoleRate: number; cutoutRate: number; bCutoutRate: number
+  /** Computed by the server from the lines — returned by GET /quotations/{id} only. */
+  totalHoleQty?: number; totalBHoleQty?: number; totalCutoutQty?: number; totalBCutoutQty?: number
+  /** = totalHoleQty*holeRate + totalBHoleQty*bHoleRate + totalCutoutQty*cutoutRate + totalBCutoutQty*bCutoutRate,
+   * folded into totalValue (added to the basic amount before rounding), same as GET returns it. */
+  holesCutoutAmount?: number
   lines: QuotationLineDto[]
 }
 export interface NewCustomerRequest {
@@ -546,18 +557,22 @@ export interface CreateQuotationLine {
   thicknessMm?: number | null
   manualArea?: number | null
   manualBasicAmount?: number | null
+  holeQty: number; bHoleQty: number; cutoutQty: number; bCutoutQty: number
 }
 export interface CreateQuotationRequest {
   /** 0 when creating the customer inline via newCustomer. */
   customerId: number
   newCustomer?: NewCustomerRequest
   validUntil?: string
+  /** One rate per hole/cutout type, applied to the sum of every line's qty for that type. */
+  holeRate?: number; bHoleRate?: number; cutoutRate?: number; bCutoutRate?: number
   lines: CreateQuotationLine[]
 }
 /** PUT /quotations/{id}. No inline new-customer here — an edit targets an existing quotation. */
 export interface UpdateQuotationRequest {
   customerId: number
   validUntil?: string
+  holeRate?: number; bHoleRate?: number; cutoutRate?: number; bCutoutRate?: number
   lines: CreateQuotationLine[]
 }
 
