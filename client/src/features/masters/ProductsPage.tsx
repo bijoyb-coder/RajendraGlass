@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Plus, X, Layers, Printer, Pencil } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Plus, X, Layers, Printer, Pencil, ArrowLeftCircle } from 'lucide-react'
 import { useCreateProductMutation, useListProductsQuery, useUpdateProductMutation, useDeleteProductMutation } from './mastersApi'
 import {
   useDataGrid,
@@ -24,6 +25,13 @@ const emptyForm: Partial<ProductDto> = { code: '', description: '', category: ''
 type SortKey = 'code' | 'description' | 'thicknessMm' | 'colour' | 'sellingRate'
 
 export default function ProductsPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  // Only set when we arrived here via Quotation Entry's "+ Add New Product…" -- a direct visit
+  // from the main menu never carries this, so it never redirects back (see handleSubmit below).
+  const returnState = location.state as { returnTo?: string; targetLineKey?: string; draft?: unknown } | null
+  const returningToQuotation = returnState?.returnTo === 'quotation'
+
   const { data, isLoading } = useListProductsQuery()
   const [createProduct, { isLoading: creating }] = useCreateProductMutation()
   const [updateProduct, { isLoading: updating }] = useUpdateProductMutation()
@@ -32,6 +40,12 @@ export default function ProductsPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<Partial<ProductDto>>(emptyForm)
   const saving = creating || updating
+
+  // Jump straight to the New Product form -- the whole point of this trip.
+  useEffect(() => {
+    if (returningToQuotation) openNew()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const {
     rows,
@@ -121,11 +135,20 @@ export default function ProductsPage() {
     try {
       if (editingId) {
         await updateProduct({ id: editingId, body: form }).unwrap()
+        setForm(emptyForm)
+        closeForm()
       } else {
-        await createProduct(form).unwrap()
+        const result = await createProduct(form).unwrap()
+        setForm(emptyForm)
+        closeForm()
+        // Only the "+ Add New Product…" trip from Quotation Entry carries this -- a product
+        // created from the main menu just stays here, as it always has.
+        if (returningToQuotation) {
+          navigate('/sales/quotations', {
+            state: { restoreDraft: returnState!.draft, targetLineKey: returnState!.targetLineKey, newProductId: result.productId },
+          })
+        }
       }
-      setForm(emptyForm)
-      closeForm()
     } catch (err: any) {
       void alertError(err?.data?.title ?? 'Could not save', err?.data?.detail ?? 'The product could not be saved.')
     }
@@ -133,6 +156,12 @@ export default function ProductsPage() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {returningToQuotation && (
+        <div className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-800">
+          <ArrowLeftCircle size={16} />
+          Save this product to return to your quotation with it selected.
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-900">Products</h1>

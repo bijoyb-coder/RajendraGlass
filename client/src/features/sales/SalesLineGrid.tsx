@@ -326,9 +326,16 @@ interface Props {
   /** Document-level "round to the nearest rupee" checkbox shown next to Total -- not per line.
    * Omit to leave the total unrounded (e.g. Sales Orders, which don't offer this). */
   roundOff?: RoundOffToggle;
+  /** false hides the per-line Description input (Quotations use a single document-level
+   * Description textarea instead -- see QuotationsPage). Defaults to true. */
+  showItemDescription?: boolean;
+  /** When supplied, the product dropdown gets a trailing "+ Add New Product…" option; picking it
+   * calls this with the line's key instead of changing the product, so the caller can navigate to
+   * Product Master and (on save) come back with the new product selected into that same line. */
+  onAddNewProduct?: (lineKey: string) => void;
 }
 
-export default function SalesLineGrid({ lines, products, onChange, holesCutout, showGst = true, roundOff }: Props) {
+export default function SalesLineGrid({ lines, products, onChange, holesCutout, showGst = true, roundOff, showItemDescription = true, onAddNewProduct }: Props) {
   // Free stock across every godown, by product — checked live as a product/qty is entered so a
   // shortage shows before the document is even saved, not discovered at dispatch time.
   const { data: stockSummary } = useStockSummaryQuery();
@@ -423,7 +430,10 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                   <td className="py-2 pr-2">
                     <select
                       value={l.productId || ""}
-                      onChange={(e) => onProductChange(l.key, Number(e.target.value))}
+                      onChange={(e) => {
+                        if (e.target.value === "__new__") { onAddNewProduct?.(l.key); return; }
+                        onProductChange(l.key, Number(e.target.value));
+                      }}
                       className={cellInput}
                     >
                       <option value="">No product (charge line)…</option>
@@ -432,13 +442,16 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                           {p.code} — {p.description}
                         </option>
                       ))}
+                      {onAddNewProduct && <option value="__new__">+ Add New Product…</option>}
                     </select>
-                    <input
-                      placeholder="Description / remarks"
-                      value={l.description}
-                      onChange={(e) => updateLine(l.key, { description: e.target.value })}
-                      className={`${cellInput} mt-1.5`}
-                    />
+                    {showItemDescription && (
+                      <input
+                        placeholder="Description / remarks"
+                        value={l.description}
+                        onChange={(e) => updateLine(l.key, { description: e.target.value })}
+                        className={`${cellInput} mt-1.5`}
+                      />
+                    )}
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                       <select
                         value={preset === "CUSTOM" ? "" : preset}
