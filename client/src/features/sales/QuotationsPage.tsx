@@ -27,10 +27,8 @@ import SalesLineGrid, {
   isComplete,
   toCreateLine,
   fromSavedLine,
-  getLineStockShortage,
 } from "./SalesLineGrid";
 import type { SalesLine } from "./SalesLineGrid";
-import { useStockSummaryQuery } from "../reports/reportsApi";
 import { alertError, confirmAction } from "../../lib/alerts";
 import {
   useDataGrid,
@@ -107,7 +105,6 @@ export default function QuotationsPage() {
   const { data, isLoading } = useListQuotationsQuery();
   const { data: customers } = useListCustomersQuery();
   const { data: products } = useListProductsQuery();
-  const { data: stockSummary } = useStockSummaryQuery();
   const [createQuotation, { isLoading: saving }] = useCreateQuotationMutation();
   const [updateQuotation, { isLoading: updating }] = useUpdateQuotationMutation();
   const [deleteQuotation] = useDeleteQuotationMutation();
@@ -295,23 +292,8 @@ export default function QuotationsPage() {
       return;
     }
 
-    // Stock is checked once more, authoritatively, right before saving — the live per-row badge
-    // is only advisory while the operator is still typing; a quotation that is short on stock
-    // must not be allowed to save at all.
-    const freeStockByProduct = new Map<number, number>();
-    for (const r of stockSummary?.items ?? []) freeStockByProduct.set(r.productId, r.qtyFree);
-    const shortageLines: string[] = [];
-    for (const l of valid) {
-      const product = products?.items.find((p) => p.productId === l.productId);
-      const shortage = getLineStockShortage(l, product, freeStockByProduct.get(l.productId) ?? 0);
-      if (shortage && shortage.short > 0.0001) {
-        shortageLines.push(`${product?.code ?? "Item"}: short ${shortage.short.toFixed(2)} ${shortage.unit}`);
-      }
-    }
-    if (shortageLines.length > 0) {
-      alertError("Stock is short", `This quotation cannot be saved — stock is short for:\n${shortageLines.join("\n")}`);
-      return;
-    }
+    // Stock is not checked here — a quotation is allowed to save even when it's short on stock
+    // (the live per-row badge on each line is still shown, purely advisory).
 
     try {
       // Quotations don't carry GST -- every line is sent with gstPct forced to 0 regardless of

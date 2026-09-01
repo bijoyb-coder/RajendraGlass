@@ -232,22 +232,10 @@ public class InvoicesController(IDbConnectionFactory db, IEInvoiceGateway eInvoi
                     return UnprocessableEntity(new ProblemResponse { Title = "Price below minimum", Status = 422, ErrorCode = "PRICE_BELOW_MIN", Detail = $"Rate {line.RatePerUnit} is below the minimum selling price {minPrice} for this product." });
                 }
 
+                // Stock is not checked here -- a sale is allowed to go through even when it takes
+                // Inventory.StockBalance negative (see the upsert deduction below); the business has
+                // chosen to run without a sufficiency gate rather than block a sales entry.
                 decimal requiredStockQty = StockUnitConversion.ToStockUnit(line.Quantity, (string)product.SellingUnit, (string)product.StockUnit);
-                var balance = conn.QueryFirstOrDefault(
-                    "SELECT (QtyOnHand - QtyReserved - QtyBlocked - QtyDamaged) AS QtyFree FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @godownId",
-                    new { line.ProductId, godownId }, tx);
-                decimal qtyFree = balance?.QtyFree ?? 0m;
-                if (qtyFree < requiredStockQty)
-                {
-                    tx.Rollback();
-                    return Conflict(new ProblemResponse
-                    {
-                        Title = "Stock conflict",
-                        Status = 409,
-                        ErrorCode = "STOCK_INSUFFICIENT",
-                        Detail = $"Only {qtyFree} {product.StockUnit} of this product is available; {requiredStockQty} {product.StockUnit} was billed."
-                    });
-                }
                 stockDeductions.Add((line.ProductId, requiredStockQty));
 
                 decimal lineBasic = Math.Round(line.Quantity * line.RatePerUnit, 2);
@@ -334,9 +322,19 @@ public class InvoicesController(IDbConnectionFactory db, IEInvoiceGateway eInvoi
 
             foreach (var (productId, requiredStockQty) in stockDeductions)
             {
-                conn.Execute(
-                    "UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @requiredStockQty WHERE ProductId = @productId AND GodownId = @godownId",
-                    new { requiredStockQty, productId, godownId }, tx);
+                // Upsert, not update-only -- a product sold before it was ever purchased/opened has
+                // no StockBalance row yet, and this must still leave a visible negative balance
+                // rather than silently no-op (see OffcutAllocation.DeductStockAndLogOffcut, the same
+                // pattern Counter Billing and Cutting Entry already use).
+                var balance = conn.QueryFirstOrDefault(
+                    "SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @productId AND GodownId = @godownId",
+                    new { productId, godownId }, tx);
+                if (balance is null)
+                    conn.Execute("INSERT INTO Inventory.StockBalance (ProductId, GodownId, QtyOnHand) VALUES (@productId, @godownId, -@requiredStockQty)",
+                        new { productId, godownId, requiredStockQty }, tx);
+                else
+                    conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @requiredStockQty WHERE StockBalanceId = @id",
+                        new { requiredStockQty, id = (int)balance.StockBalanceId }, tx);
                 conn.Execute(
                     "INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty) VALUES (@productId, @godownId, 'Sale', 'Invoice', @invoiceId, @negQty)",
                     new { productId, godownId, invoiceId, negQty = -requiredStockQty }, tx);

@@ -156,24 +156,12 @@ public class CounterInvoicesController(IDbConnectionFactory db, INotificationPub
                     line.RateUnit, line.ApplyThickness, line.ChargeRoundingInch, line.GstPct, line.DiscountPct,
                     line.ThicknessMm, thicknessFromProduct, line.ManualArea, line.ManualBasicAmount);
 
+                // Stock is not checked here -- a counter sale is allowed to go through even when it
+                // takes Inventory.StockBalance negative (OffcutAllocation.DeductStockAndLogOffcut
+                // below already upserts rather than update-only, so the negative balance is real and
+                // visible, not silently dropped).
                 string? stockUnit = product.StockUnit;
                 decimal required = StockUnitConversion.RequiredQty(calc, stockUnit);
-
-                var balance = conn.QueryFirstOrDefault(
-                    "SELECT (QtyOnHand - QtyReserved - QtyBlocked - QtyDamaged) AS QtyFree FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @godownId",
-                    new { line.ProductId, godownId }, tx);
-                decimal qtyFree = balance?.QtyFree ?? 0m;
-                if (qtyFree < required)
-                {
-                    tx.Rollback();
-                    return Conflict(new ProblemResponse
-                    {
-                        Title = "Stock conflict",
-                        Status = 409,
-                        ErrorCode = "STOCK_INSUFFICIENT",
-                        Detail = $"Only {qtyFree} {stockUnit} of {product.Code} is available; {required} {stockUnit} was billed at the counter. Resolve this sale manually."
-                    });
-                }
 
                 basicTotal += calc.BasicAmount;
                 discountTotal += calc.DiscountAmount;

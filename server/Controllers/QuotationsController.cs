@@ -160,11 +160,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         using var tx = conn.BeginTransaction();
         try
         {
-            // Stock is checked once more, authoritatively, before anything is written — the
-            // frontend's live per-row badge is only advisory while the operator is typing; a
-            // quotation short on stock must be refused outright, not merely flagged.
-            var shortageProblem = CheckStockShortage(conn, tx, req.Lines);
-            if (shortageProblem is not null) { tx.Rollback(); return shortageProblem; }
+            // Stock is not checked here -- a quotation is allowed to save even when it's short on
+            // stock (the frontend's live per-row badge is still shown, purely advisory).
 
             // Walk-in customer captured on the quotation screen: create the master record first,
             // inside the same transaction, so a failed quotation doesn't leave an orphan customer.
@@ -256,8 +253,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             if (status == "Converted")
                 return Invalid("Quotation", "This quotation has already been converted to a sales order and can no longer be edited.");
 
-            var shortageProblem = CheckStockShortage(conn, tx, req.Lines);
-            if (shortageProblem is not null) { tx.Rollback(); return shortageProblem; }
+            // Stock is not checked here either -- see the same note on Create above.
 
             conn.Execute("DELETE FROM Sales.QuotationLine WHERE QuotationId = @id", new { id }, tx);
 
@@ -283,73 +279,6 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             tx.Rollback();
             throw;
         }
-    }
-
-    /// <summary>
-    /// Refuses to save when any line's required stock exceeds what's free across every godown —
-    /// the same "area x qty in the product's stock unit" figure the frontend's live shortage
-    /// badge shows (client/src/features/sales/SalesLineGrid.tsx getLineStockShortage), checked
-    /// once more here so a direct API call can't bypass what the UI already blocks.
-    /// </summary>
-    private static ObjectResult? CheckStockShortage(
-        System.Data.IDbConnection conn, System.Data.IDbTransaction tx, List<QuotationLineDto> lines)
-    {
-        var productIds = lines.Where(l => l.ProductId.HasValue).Select(l => l.ProductId!.Value).Distinct().ToArray();
-        if (productIds.Length == 0) return null;
-
-        var products = conn.Query<(int ProductId, string Code, string? StockUnit, decimal? ThicknessMm)>(
-            "SELECT ProductId, Code, StockUnit, ThicknessMm FROM Master.Product WHERE ProductId IN @ids",
-            new { ids = productIds }, tx)
-            .ToDictionary(r => r.ProductId, r => r);
-
-        var freeByProduct = conn.Query<(int ProductId, decimal QtyFree)>(
-            @"SELECT ProductId, SUM(QtyOnHand - QtyReserved - QtyBlocked - QtyDamaged) AS QtyFree
-              FROM Inventory.StockBalance WHERE ProductId IN @ids GROUP BY ProductId",
-            new { ids = productIds }, tx)
-            .ToDictionary(r => r.ProductId, r => r.QtyFree);
-
-        var shortages = new List<string>();
-        foreach (var l in lines)
-        {
-            if (!l.ProductId.HasValue || !products.TryGetValue(l.ProductId.Value, out var product)) continue;
-
-            var calc = QuotationCalculator.Calculate(new LineCalcInput
-            {
-                Length = l.Length,
-                Width = l.Width,
-                DimensionUnit = l.DimensionUnit,
-                Qty = l.Qty,
-                Rate = l.Rate,
-                RateUnit = l.RateUnit,
-                ThicknessMm = l.ThicknessMm ?? product.ThicknessMm ?? 0m,
-                ApplyThickness = l.ApplyThickness,
-                ChargeRoundingInch = l.ChargeRoundingInch,
-                GstPct = l.GstPct,
-                DiscountPct = l.DiscountPct,
-                ManualArea = l.ManualArea,
-                ManualBasicAmount = l.ManualBasicAmount,
-            });
-
-            decimal required = StockUnitConversion.RequiredQty(calc, product.StockUnit);
-            if (required <= 0) continue;
-
-            decimal free = freeByProduct.TryGetValue(l.ProductId.Value, out var f) ? f : 0m;
-            decimal shortfall = required - free;
-            if (shortfall > 0.0001m)
-            {
-                string unit = product.StockUnit ?? calc.AreaUnit;
-                shortages.Add($"{product.Code}: short {shortfall:0.##} {unit}");
-            }
-        }
-
-        if (shortages.Count == 0) return null;
-        return new UnprocessableEntityObjectResult(new ProblemResponse
-        {
-            Title = "Stock is short",
-            Status = 422,
-            ErrorCode = "STOCK_INSUFFICIENT",
-            Detail = "This quotation cannot be saved — stock is short for: " + string.Join("; ", shortages),
-        });
     }
 
     /// <summary>Item-wise Hole/B-Hole/Cutout/B-Cutout quantities are summed across every line and
