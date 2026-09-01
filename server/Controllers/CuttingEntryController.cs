@@ -181,27 +181,9 @@ public class CuttingEntryController(IDbConnectionFactory db) : ControllerBase
                 resolved.Add((l, (int)line.ProductId, (string)line.StockUnit, rate, actualHeight, actualWidth, sqft, amount));
             }
 
-            // Stock re-check, authoritatively, inside the same transaction the deduction happens
-            // in -- no earlier React-loaded figure is trusted, and a concurrent save against the
-            // same Product+Godown can't both pass this check (row lookups run against the live,
-            // locked table for the duration of this transaction).
-            foreach (var (l, productId, stockUnit, _, _, _, sqft, _) in resolved)
-            {
-                decimal requiredStockQty = StockUnitConversion.ToStockUnit(sqft, "SQFT", stockUnit);
-                decimal free = CuttingStockConsumption.FreeStock(conn, tx, productId, l.GodownId);
-                if (free < requiredStockQty)
-                {
-                    tx.Rollback();
-                    var product = conn.QueryFirstOrDefault<string>("SELECT Code FROM Master.Product WHERE ProductId = @productId", new { productId }, tx);
-                    return Conflict(new ProblemResponse
-                    {
-                        Title = "Insufficient Stock",
-                        Status = 409,
-                        ErrorCode = "STOCK_INSUFFICIENT",
-                        Detail = $"{product}: available stock {free:0.###} {stockUnit}, required {requiredStockQty:0.###} {stockUnit}. Cutting cannot be completed.",
-                    });
-                }
-            }
+            // Stock is not checked here -- a cutting entry is allowed to go through even when it
+            // takes Inventory.StockBalance negative (CuttingStockConsumption.Deduct below already
+            // upserts rather than update-only, so the negative balance is real and visible).
 
             int branchId = DocNumbering.DefaultBranchId(conn, tx);
             string cuttingNo = DocNumbering.NextNumber(conn, tx, branchId, DocType);
