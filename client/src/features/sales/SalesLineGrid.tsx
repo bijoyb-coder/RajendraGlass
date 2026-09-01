@@ -140,8 +140,9 @@ export function presetOf(l: SalesLine): PresetKey | "CUSTOM" {
 
 /** Live preview only — the server recalculates on save. `showGst = false` (Quotations) prices the
  * line as if its GST % were 0, without touching the line's own stored gstPct -- see the `showGst`
- * prop below. */
-export function calcLine(l: SalesLine, showGst = true) {
+ * prop below. `showItemDiscount = false` does the same for discountPct -- see the `discount` prop,
+ * which moves discounting to one document-level figure instead of a per-line percentage. */
+export function calcLine(l: SalesLine, showGst = true, showItemDiscount = true) {
   return calculateLine({
     length: l.length,
     width: l.width,
@@ -153,7 +154,7 @@ export function calcLine(l: SalesLine, showGst = true) {
     applyThickness: l.applyThickness,
     chargeRoundingInch: l.chargeRoundingInch,
     gstPct: showGst ? l.gstPct : 0,
-    discountPct: l.discountPct,
+    discountPct: showItemDiscount ? l.discountPct : 0,
     manualArea: l.manualArea,
     manualBasicAmount: l.manualBasicAmount,
   });
@@ -244,10 +245,10 @@ export function toCreateLine(l: SalesLine): CreateQuotationLine {
   };
 }
 
-export function lineTotals(lines: SalesLine[], showGst = true) {
+export function lineTotals(lines: SalesLine[], showGst = true, showItemDiscount = true) {
   return lines.reduce(
     (acc, l) => {
-      const c = calcLine(l, showGst);
+      const c = calcLine(l, showGst, showItemDiscount);
       return {
         basic: acc.basic + c.basicAmount,
         discount: acc.discount + c.discountAmount,
@@ -311,6 +312,16 @@ export interface RoundOffToggle {
   onChange: (enabled: boolean) => void;
 }
 
+/** Document-level discount applied to the whole document's basic amount (lines + holes/cutout)
+ * right before Round Off/Total. Supplying this prop switches the grid into "document discount"
+ * mode: the per-line Disc % column is hidden and every line prices as if its own discountPct were
+ * 0 (see calcLine/lineTotals's showItemDiscount), so discounting only ever happens once, here. */
+export interface DocumentDiscount {
+  type: "Percent" | "Amount";
+  value: number;
+  onChange: (patch: Partial<Pick<DocumentDiscount, "type" | "value">>) => void;
+}
+
 interface Props {
   lines: SalesLine[];
   products?: { items: ProductDto[] };
@@ -326,6 +337,10 @@ interface Props {
   /** Document-level "round to the nearest rupee" checkbox shown next to Total -- not per line.
    * Omit to leave the total unrounded (e.g. Sales Orders, which don't offer this). */
   roundOff?: RoundOffToggle;
+  /** Document-level discount shown in the totals footer, right before Round Off/Total -- see
+   * DocumentDiscount's own doc comment. Omit to keep the per-line Disc % column instead (e.g.
+   * Sales Orders, which still discount per line). */
+  discount?: DocumentDiscount;
   /** false hides the per-line Description input (Quotations use a single document-level
    * Description textarea instead -- see QuotationsPage). Defaults to true. */
   showItemDescription?: boolean;
@@ -335,7 +350,7 @@ interface Props {
   onAddNewProduct?: (lineKey: string) => void;
 }
 
-export default function SalesLineGrid({ lines, products, onChange, holesCutout, showGst = true, roundOff, showItemDescription = true, onAddNewProduct }: Props) {
+export default function SalesLineGrid({ lines, products, onChange, holesCutout, showGst = true, roundOff, discount, showItemDescription = true, onAddNewProduct }: Props) {
   // Free stock across every godown, by product — checked live as a product/qty is entered so a
   // shortage shows before the document is even saved, not discovered at dispatch time.
   const { data: stockSummary } = useStockSummaryQuery();
@@ -373,7 +388,8 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
     });
   }
 
-  const totals = lineTotals(lines, showGst);
+  const showItemDiscount = !discount;
+  const totals = lineTotals(lines, showGst, showItemDiscount);
   const totalHoleQty = lines.reduce((s, l) => s + (l.holeQty || 0), 0);
   const totalBHoleQty = lines.reduce((s, l) => s + (l.bHoleQty || 0), 0);
   const totalCutoutQty = lines.reduce((s, l) => s + (l.cutoutQty || 0), 0);
@@ -385,7 +401,16 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
       totalBCutoutQty * holesCutout.bCutoutRate
     : 0;
   const hasAnyHolesCutout = totalHoleQty > 0 || totalBHoleQty > 0 || totalCutoutQty > 0 || totalBCutoutQty > 0;
-  const rawTotal = totals.amount + holesCutoutAmount;
+  // Document-level discount (see the `discount` prop) is resolved against the subtotal — lines
+  // (already discount-free when `discount` is supplied) plus holes/cutout — and taken off before
+  // Round Off, not folded into any single line's own amount.
+  const subtotalBeforeDocDiscount = totals.amount + holesCutoutAmount;
+  const docDiscountAmount = discount
+    ? discount.type === "Percent"
+      ? (subtotalBeforeDocDiscount * discount.value) / 100
+      : discount.value
+    : 0;
+  const rawTotal = subtotalBeforeDocDiscount - docDiscountAmount;
   const displayTotal = roundOff?.enabled ? Math.round(rawTotal) : rawTotal;
 
   return (
@@ -404,7 +429,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
               <th className="py-2 font-medium w-24">Rate</th>
               <th className="py-2 font-medium w-28">Rate Unit</th>
               <th className="py-2 font-medium w-32">Basic Amount</th>
-              <th className="py-2 font-medium w-20">Disc %</th>
+              {showItemDiscount && <th className="py-2 font-medium w-20">Disc %</th>}
               {showGst && <th className="py-2 font-medium w-20">GST %</th>}
               {holesCutout && (
                 <>
@@ -420,7 +445,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
           </thead>
           <tbody className="divide-y divide-slate-100">
             {lines.map((l) => {
-              const c = calcLine(l, showGst);
+              const c = calcLine(l, showGst, showItemDiscount);
               const preset = presetOf(l);
               const perPiece = l.rateUnit === "PER_PIECE";
               const shortage = stockShortage(l);
@@ -680,17 +705,19 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                     )}
                   </td>
 
-                  <td className="py-2 pr-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step="0.01"
-                      value={l.discountPct || ""}
-                      onChange={(e) => updateLine(l.key, { discountPct: Number(e.target.value) })}
-                      className={cellInput}
-                    />
-                  </td>
+                  {showItemDiscount && (
+                    <td className="py-2 pr-2">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step="0.01"
+                        value={l.discountPct || ""}
+                        onChange={(e) => updateLine(l.key, { discountPct: Number(e.target.value) })}
+                        className={cellInput}
+                      />
+                    </td>
+                  )}
                   {showGst && (
                     <td className="py-2 pr-2">
                       <input
@@ -779,6 +806,31 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
           {totals.discount > 0 && (
             <div className="text-slate-500">
               Discount: <span className="font-medium text-slate-700">− {money(totals.discount)}</span>
+            </div>
+          )}
+          {discount && (
+            <div className="flex items-center justify-end gap-1.5 text-slate-500">
+              Discount
+              <select
+                value={discount.type}
+                onChange={(e) => discount.onChange({ type: e.target.value as DocumentDiscount["type"] })}
+                className="rounded border border-slate-300 px-1 py-0.5 text-xs focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
+              >
+                <option value="Percent">%</option>
+                <option value="Amount">₹</option>
+              </select>
+              <input
+                type="number"
+                min={0}
+                max={discount.type === "Percent" ? 100 : undefined}
+                step="0.01"
+                value={discount.value || ""}
+                onChange={(e) => discount.onChange({ value: Number(e.target.value) })}
+                className="w-20 rounded border border-slate-300 px-1.5 py-0.5 text-xs text-right focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400"
+              />
+              {docDiscountAmount > 0 && (
+                <span className="font-medium text-slate-700">− {money(docDiscountAmount)}</span>
+              )}
             </div>
           )}
           {showGst && (

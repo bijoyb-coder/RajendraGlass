@@ -34,7 +34,10 @@ export default function QuotationViewPage() {
   // itself, though, comes from q.totalValue (already rounded to the nearest rupee server-side),
   // not this raw line sum — q.roundOff is exactly the gap between the two.
   const basic = q.lines.reduce((s, l) => s + l.basicAmount, 0)
-  const discount = q.lines.reduce((s, l) => s + l.discountAmount, 0)
+  // Historical only — a quotation saved before discount became document-level may still carry a
+  // nonzero per-line figure; every line saved going forward always has discountAmount = 0 (see
+  // q.discountAmount below, the one real discount figure now).
+  const lineDiscountTotal = q.lines.reduce((s, l) => s + l.discountAmount, 0)
   const anyOverride = q.lines.some((l) => l.isAreaManualOverride || l.isAmountManualOverride)
   const hasAnyHolesCutout = (q.totalHoleQty ?? 0) > 0 || (q.totalBHoleQty ?? 0) > 0 || (q.totalCutoutQty ?? 0) > 0 || (q.totalBCutoutQty ?? 0) > 0
 
@@ -167,7 +170,13 @@ export default function QuotationViewPage() {
                 </div>
               </div>
             )}
-            {discount > 0 && <Row label="Discount" value={`− ${money(discount)}`} />}
+            {lineDiscountTotal > 0 && <Row label="Discount" value={`− ${money(lineDiscountTotal)}`} />}
+            {q.discountAmount > 0 && (
+              <Row
+                label={`Discount (${q.discountType === "Percent" ? `${num(q.discountValue, 2)}%` : money(q.discountValue)})`}
+                value={`− ${money(q.discountAmount)}`}
+              />
+            )}
             {q.roundOffEnabled && <Row label="Round Off" value={money(q.roundOff)} />}
             <div className="flex justify-between font-bold text-brand-900 border-t-2 border-brand-800 pt-2 mt-2 text-base">
               <span>Total</span><span>₹ {money(q.totalValue)}</span>

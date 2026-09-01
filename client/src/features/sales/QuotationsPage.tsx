@@ -46,6 +46,7 @@ import type {
   NewCustomerRequest,
   CreateQuotationLine,
   QuotationDto,
+  QuotationDiscountType,
 } from "../../lib/types";
 
 const inputClass =
@@ -97,6 +98,8 @@ interface QuotationDraft {
   cutoutRate: number;
   bCutoutRate: number;
   roundOffEnabled: boolean;
+  discountType: QuotationDiscountType;
+  discountValue: number;
 }
 
 export default function QuotationsPage() {
@@ -131,6 +134,11 @@ export default function QuotationsPage() {
   // Document-level "round to the nearest rupee" toggle -- not per line. Defaults on, matching
   // the auto-rounding this page always did before this became a visible choice.
   const [roundOffEnabled, setRoundOffEnabled] = useState(true);
+  // Document-level discount -- not per line (every line's own discountPct is forced to 0, see
+  // SalesLineGrid's discount prop). Applied to the whole quotation's basic amount right before
+  // Round Off/Total.
+  const [discountType, setDiscountType] = useState<QuotationDiscountType>("Percent");
+  const [discountValue, setDiscountValue] = useState(0);
   // Set right after restoring a draft that came back from "+ Add New Product…" -- names the line
   // waiting to receive the product once useListProductsQuery's cache (invalidated by the create)
   // has actually refetched and includes it.
@@ -154,6 +162,8 @@ export default function QuotationsPage() {
     setCutoutRate(draft.cutoutRate);
     setBCutoutRate(draft.bCutoutRate);
     setRoundOffEnabled(draft.roundOffEnabled);
+    setDiscountType(draft.discountType);
+    setDiscountValue(draft.discountValue);
     setShowForm(true);
     if (state.targetLineKey && state.newProductId) {
       setPendingNewProduct({ lineKey: state.targetLineKey, productId: state.newProductId });
@@ -188,7 +198,7 @@ export default function QuotationsPage() {
   function handleAddNewProduct(lineKey: string) {
     const draft: QuotationDraft = {
       editingId, customerId, newCustomerMode, newCustomer, lines, description,
-      holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled,
+      holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue,
     };
     navigate("/masters/products", { state: { returnTo: "quotation", targetLineKey: lineKey, draft } });
   }
@@ -240,6 +250,8 @@ export default function QuotationsPage() {
     setCutoutRate(0);
     setBCutoutRate(0);
     setRoundOffEnabled(true);
+    setDiscountType("Percent");
+    setDiscountValue(0);
   }
 
   function openNewForm() {
@@ -259,6 +271,8 @@ export default function QuotationsPage() {
     setCutoutRate(full.cutoutRate);
     setBCutoutRate(full.bCutoutRate);
     setRoundOffEnabled(full.roundOffEnabled);
+    setDiscountType(full.discountType);
+    setDiscountValue(full.discountValue);
     setShowForm(true);
   }
 
@@ -286,9 +300,11 @@ export default function QuotationsPage() {
       );
       return;
     }
-    const badDisc = valid.find((l) => l.discountPct < 0 || l.discountPct > 100);
-    if (badDisc) {
-      alertError("Invalid discount %", "Discount % must be between 0 and 100.");
+    if (discountValue < 0 || (discountType === "Percent" && discountValue > 100)) {
+      alertError(
+        "Invalid discount",
+        discountType === "Percent" ? "Discount % must be between 0 and 100." : "Discount amount cannot be negative.",
+      );
       return;
     }
 
@@ -296,13 +312,14 @@ export default function QuotationsPage() {
     // (the live per-row badge on each line is still shown, purely advisory).
 
     try {
-      // Quotations don't carry GST -- every line is sent with gstPct forced to 0 regardless of
-      // whatever value it happens to hold (e.g. a legacy quotation loaded for edit).
-      const payload: CreateQuotationLine[] = valid.map(toCreateLine).map((l) => ({ ...l, gstPct: 0 }));
+      // Quotations don't carry GST, and discount is document-level now, not per line -- every
+      // line is sent with gstPct/discountPct forced to 0 regardless of whatever value it happens
+      // to hold (e.g. a legacy quotation loaded for edit).
+      const payload: CreateQuotationLine[] = valid.map(toCreateLine).map((l) => ({ ...l, gstPct: 0, discountPct: 0 }));
       if (editingId) {
         await updateQuotation({
           id: editingId,
-          body: { customerId: Number(customerId), lines: payload, description, holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled },
+          body: { customerId: Number(customerId), lines: payload, description, holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue },
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -317,6 +334,8 @@ export default function QuotationsPage() {
           cutoutRate,
           bCutoutRate,
           roundOffEnabled,
+          discountType,
+          discountValue,
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -344,10 +363,11 @@ export default function QuotationsPage() {
   ) {
     try {
       const full = await fetchQuotation(quotationId).unwrap();
-      // Carry the whole line across — size, unit, rate basis, thickness, discount and any
-      // override — so the order prices to the same figure as the quotation it came from. Every
-      // quotation line carries gstPct=0 (quotations don't have GST), so the resulting order
-      // starts GST-free too; edit it there if the order itself needs GST.
+      // Carry the whole line across — size, unit, rate basis, thickness and any override — so
+      // the order prices to the same per-line figure as the quotation it came from. Every
+      // quotation line carries gstPct=0 (quotations don't have GST) and discountPct=0 (discount
+      // is document-level on the quotation, not carried per line), so the resulting order starts
+      // GST-free and discount-free too; edit it there if the order itself needs either.
       const qLines: CreateQuotationLine[] = full.lines.map((l) => toCreateLine(fromSavedLine(l)));
       await createSalesOrder({
         customerId: customerIdForOrder,
@@ -553,6 +573,14 @@ export default function QuotationsPage() {
             showItemDescription={false}
             onAddNewProduct={handleAddNewProduct}
             roundOff={{ enabled: roundOffEnabled, onChange: setRoundOffEnabled }}
+            discount={{
+              type: discountType,
+              value: discountValue,
+              onChange: (patch) => {
+                if (patch.type !== undefined) setDiscountType(patch.type);
+                if (patch.value !== undefined) setDiscountValue(patch.value);
+              },
+            }}
             holesCutout={{
               holeRate,
               bHoleRate,

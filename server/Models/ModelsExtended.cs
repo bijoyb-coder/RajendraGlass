@@ -691,6 +691,14 @@ public class QuotationDto
     public decimal RoundOff { get; set; }
     /// <summary>Document-level "round to nearest rupee" checkbox -- not per line. Defaults true.</summary>
     public bool RoundOffEnabled { get; set; } = true;
+    /// <summary>Document-level discount, applied to the whole quotation's basic amount (lines +
+    /// holes/cutout) right before Round Off/Total -- not per line (every line's own DiscountPct
+    /// is forced to 0, see QuotationsController.Create/Update). "Percent" or "Amount".</summary>
+    public string DiscountType { get; set; } = "Percent";
+    /// <summary>Read as a percentage or a flat rupee figure depending on <see cref="DiscountType"/>.</summary>
+    public decimal DiscountValue { get; set; }
+    /// <summary>The resolved rupee amount DiscountValue/DiscountType produced at save time.</summary>
+    public decimal DiscountAmount { get; set; }
     /// <summary>True while no sales order has been generated against this quotation — the same
     /// condition the server re-checks in DELETE (see QuotationsController.Delete).</summary>
     public bool CanDelete { get; set; }
@@ -728,6 +736,9 @@ public class CreateQuotationRequest
     public decimal BCutoutRate { get; set; }
     /// <summary>Document-level "round to nearest rupee" checkbox -- not per line.</summary>
     public bool RoundOffEnabled { get; set; } = true;
+    /// <summary>"Percent" or "Amount" -- see QuotationDto.DiscountType.</summary>
+    public string DiscountType { get; set; } = "Percent";
+    public decimal DiscountValue { get; set; }
     public List<QuotationLineDto> Lines { get; set; } = new();
 }
 
@@ -745,6 +756,8 @@ public class UpdateQuotationRequest
     public decimal CutoutRate { get; set; }
     public decimal BCutoutRate { get; set; }
     public bool RoundOffEnabled { get; set; } = true;
+    public string DiscountType { get; set; } = "Percent";
+    public decimal DiscountValue { get; set; }
     public List<QuotationLineDto> Lines { get; set; } = new();
 }
 

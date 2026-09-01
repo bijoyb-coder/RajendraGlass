@@ -520,6 +520,7 @@ export interface QuotationLineDto {
   calculationMethod: CalculationMethod
   isAreaManualOverride: boolean; isAmountManualOverride: boolean
 }
+export type QuotationDiscountType = 'Percent' | 'Amount'
 export interface QuotationDto {
   quotationId: number; quotationNo?: string | null; customerId: number; customerName?: string | null
   /** Returned by GET /quotations/{id} only (the print view needs them); absent in the list. */
@@ -532,6 +533,9 @@ export interface QuotationDto {
   totalValue: number; roundOff: number
   /** Document-level "round to nearest rupee" checkbox -- not per line. Defaults true. */
   roundOffEnabled: boolean
+  /** Document-level discount, applied to the whole quotation's basic amount (lines + holes/cutout)
+   * right before Round Off/Total -- not per line (every line's own discountPct is forced to 0). */
+  discountType: QuotationDiscountType; discountValue: number; discountAmount: number
   /** True while no sales order has been generated against this quotation. */
   canDelete: boolean
   /** One rate per hole/cutout type, entered once for the whole document (not per line) and
@@ -574,6 +578,9 @@ export interface CreateQuotationRequest {
   holeRate?: number; bHoleRate?: number; cutoutRate?: number; bCutoutRate?: number
   /** Document-level "round to nearest rupee" checkbox. Defaults true server-side if omitted. */
   roundOffEnabled?: boolean
+  /** Document-level discount -- see QuotationDto.discountType. Defaults to 'Percent'/0 server-side
+   * if omitted. */
+  discountType?: QuotationDiscountType; discountValue?: number
   lines: CreateQuotationLine[]
 }
 /** PUT /quotations/{id}. No inline new-customer here — an edit targets an existing quotation. */
@@ -583,6 +590,7 @@ export interface UpdateQuotationRequest {
   description?: string
   holeRate?: number; bHoleRate?: number; cutoutRate?: number; bCutoutRate?: number
   roundOffEnabled?: boolean
+  discountType?: QuotationDiscountType; discountValue?: number
   lines: CreateQuotationLine[]
 }
 
