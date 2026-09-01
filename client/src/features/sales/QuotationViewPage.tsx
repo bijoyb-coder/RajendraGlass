@@ -107,6 +107,7 @@ export default function QuotationViewPage() {
                 <th className="py-2 font-medium text-right">Length</th>
                 <th className="py-2 font-medium text-right">Width</th>
                 <th className="py-2 font-medium">Unit</th>
+                <th className="py-2 font-medium text-right">Chargeable Size</th>
                 <th className="py-2 font-medium text-right">Qty</th>
                 <th className="py-2 font-medium text-right">Area</th>
                 <th className="py-2 font-medium text-right">Rate</th>
@@ -124,13 +125,18 @@ export default function QuotationViewPage() {
                     <div className="text-[11px] text-slate-400">
                       {l.productCode ? `${l.productCode} · ` : ''}
                       {CALC_METHOD_LABEL[l.calculationMethod] ?? l.calculationMethod}
-                      {chargeNote(l) ? ` · chargeable ${chargeNote(l)}` : ''}
                     </div>
                   </td>
                   <td className="py-2.5 text-right text-slate-600">{num(l.thicknessMm, 2)}</td>
                   <td className="py-2.5 text-right text-slate-700">{l.rateUnit === 'PER_PIECE' ? '—' : num(l.length, 4)}</td>
                   <td className="py-2.5 text-right text-slate-700">{l.rateUnit === 'PER_PIECE' ? '—' : num(l.width, 4)}</td>
                   <td className="py-2.5 text-slate-500">{l.rateUnit === 'PER_PIECE' ? '—' : l.dimensionUnit}</td>
+                  <td className="py-2.5 text-right text-slate-700">
+                    {l.rateUnit === 'PER_PIECE' ? '—' : `${l.chargeLengthInch.toFixed(2)}" × ${l.chargeWidthInch.toFixed(2)}"`}
+                    {l.rateUnit !== 'PER_PIECE' && chargeNote(l) && (
+                      <div className="text-[11px] text-slate-400">rounded to {l.chargeRoundingInch}&quot;</div>
+                    )}
+                  </td>
                   <td className="py-2.5 text-right text-slate-700">{num(l.qty, 2)}</td>
                   <td className="py-2.5 text-right text-slate-700">
                     {l.rateUnit === 'PER_PIECE' ? '—' : num(l.area, 4)}

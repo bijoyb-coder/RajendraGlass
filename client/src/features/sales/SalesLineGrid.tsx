@@ -424,6 +424,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
               <th className="py-2 font-medium w-24">Length</th>
               <th className="py-2 font-medium w-24">Width</th>
               <th className="py-2 font-medium w-24">Unit</th>
+              <th className="py-2 font-medium w-28">Chargeable Size</th>
               <th className="py-2 font-medium w-20">Qty</th>
               <th className="py-2 font-medium w-28">Area</th>
               <th className="py-2 font-medium w-24">Rate</th>
@@ -577,10 +578,24 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                         </option>
                       ))}
                     </select>
-                    {!perPiece && l.chargeRoundingInch > 0 && (
-                      <div className="mt-1 text-[10px] text-brand-600 font-semibold">
-                        → {num(c.chargeLengthInch, 2)}&quot; × {num(c.chargeWidthInch, 2)}&quot;
-                      </div>
+                  </td>
+
+                  {/* Chargeable size -- the dimensions actually billed, after rounding each up to
+                      the next multiple of chargeRoundingInch (Sheet3's inch rows use 6", but any
+                      step works the same way, e.g. 3" -- see QuotationCalculator.RoundUpToStep).
+                      Equal to the entered Length/Width when rounding is off. */}
+                  <td className="py-2 pr-2 text-slate-600">
+                    {perPiece ? (
+                      "n/a"
+                    ) : (
+                      <>
+                        {num(c.chargeLengthInch, 2)}&quot; × {num(c.chargeWidthInch, 2)}&quot;
+                        {l.chargeRoundingInch > 0 && (
+                          <div className="mt-0.5 text-[10px] text-brand-600 font-semibold">
+                            rounded to {l.chargeRoundingInch}&quot;
+                          </div>
+                        )}
+                      </>
                     )}
                   </td>
 
