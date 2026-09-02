@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useDispatch, useSelector } from 'react-redux'
-import { ChevronDown, LogOut, Menu, Lock, X, Wifi, WifiOff, CloudUpload } from 'lucide-react'
+import { ChevronDown, LogOut, Menu, Lock, X, Wifi, WifiOff, CloudUpload, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import type { RootState } from '../app/store'
 import { logout } from '../features/auth/authSlice'
 import { useLogoutApiMutation } from '../features/auth/authApi'
@@ -19,7 +19,16 @@ export default function AppShell() {
   const user = useSelector((s: RootState) => s.auth.user)
   const dispatch = useDispatch()
   const navigate = useNavigate()
-  const [sidebarOpen, setSidebarOpen] = useState(true)
+  // Persisted so a collapsed sidebar (chosen to give the right panel full-width room) stays
+  // collapsed across reloads/navigation rather than snapping back open every time.
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    try {
+      const stored = localStorage.getItem('rgc.sidebarOpen')
+      return stored === null ? true : stored === 'true'
+    } catch {
+      return true
+    }
+  })
   const [mobileOpen, setMobileOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [logoutApi] = useLogoutApiMutation()
@@ -28,6 +37,14 @@ export default function AppShell() {
   const visibleSections = navSections
     .map((section) => ({ ...section, items: section.items.filter((item) => !item.perm || hasPerm(item.perm)) }))
     .filter((section) => section.items.length > 0)
+
+  function toggleSidebar() {
+    setSidebarOpen((v) => {
+      const next = !v
+      try { localStorage.setItem('rgc.sidebarOpen', String(next)) } catch { /* private mode, etc — just skip persisting */ }
+      return next
+    })
+  }
 
   async function handleLogout() {
     try { await logoutApi().unwrap() } catch { /* best-effort server revoke */ }
@@ -120,10 +137,11 @@ export default function AppShell() {
         </nav>
 
         <button
-          onClick={() => setSidebarOpen((v) => !v)}
+          onClick={toggleSidebar}
+          title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
           className="relative h-11 flex items-center justify-center border-t border-white/10 text-brand-200 hover:text-white hover:bg-white/5 transition"
         >
-          <Menu size={16} />
+          {sidebarOpen ? <PanelLeftClose size={16} /> : <PanelLeftOpen size={16} />}
         </button>
       </aside>
 
@@ -174,6 +192,16 @@ export default function AppShell() {
           <div className="flex items-center gap-3">
             <button className="md:hidden text-slate-500" onClick={() => setMobileOpen(true)}>
               <Menu size={22} />
+            </button>
+            {/* Desktop-only sidebar collapse — the sidebar's own toggle sits at its bottom edge
+                and is easy to miss; this puts the same control somewhere a user glances at first,
+                for the "hide the menu, give the right panel full width" workflow. */}
+            <button
+              className="hidden md:inline-flex text-slate-500 hover:text-brand-700 transition"
+              onClick={toggleSidebar}
+              title={sidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+            >
+              {sidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}
             </button>
 
             {/* User identity — extreme left, with logout */}
