@@ -435,29 +435,37 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
         <table className="w-full text-sm min-w-[1500px]">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-              <th className="py-2 font-medium min-w-[190px]">Product / Description</th>
-              <th className="py-2 font-medium w-20">Thick. (mm)</th>
-              <th className="py-2 font-medium w-24">Length</th>
-              <th className="py-2 font-medium w-24">Width</th>
-              <th className="py-2 font-medium w-24">Unit</th>
-              <th className="py-2 font-medium w-24">Charge Height</th>
-              <th className="py-2 font-medium w-24">Charge Width</th>
-              <th className="py-2 font-medium w-20">Qty</th>
-              <th className="py-2 font-medium w-28">Area</th>
-              <th className="py-2 font-medium w-24">Rate</th>
-              <th className="py-2 font-medium w-28">Rate Unit</th>
-              <th className="py-2 font-medium w-32">Basic Amount</th>
-              {showItemDiscount && <th className="py-2 font-medium w-20">Disc %</th>}
-              {showGst && <th className="py-2 font-medium w-20">GST %</th>}
+              <th className="py-2 pr-2 font-medium min-w-[190px]">Product / Description</th>
+              <th className="py-2 pr-2 font-medium w-20">Thick. (mm)</th>
+              <th className="py-2 pr-2 font-medium w-24">Length</th>
+              <th className="py-2 pr-2 font-medium w-24">Width</th>
+              <th className="py-2 pr-2 font-medium w-24">Unit</th>
+              <th className="py-2 pr-2 font-medium w-24">
+                Charge
+                <br />
+                Height
+              </th>
+              <th className="py-2 pr-2 font-medium w-24">
+                Charge
+                <br />
+                Width
+              </th>
+              <th className="py-2 pr-2 font-medium w-20">Qty</th>
+              <th className="py-2 pr-2 font-medium w-28">Area</th>
+              <th className="py-2 pr-2 font-medium w-24">Rate</th>
+              <th className="py-2 pr-2 font-medium w-28">Rate Unit</th>
+              <th className="py-2 pr-2 font-medium w-32">Basic Amount</th>
+              {showItemDiscount && <th className="py-2 pr-2 font-medium w-20">Disc %</th>}
+              {showGst && <th className="py-2 pr-2 font-medium w-20">GST %</th>}
               {holesCutout && (
                 <>
-                  <th className="py-2 font-medium w-16">Hole</th>
-                  <th className="py-2 font-medium w-16">B-Hole</th>
-                  <th className="py-2 font-medium w-16">Cutout</th>
-                  <th className="py-2 font-medium w-16">B-Cutout</th>
+                  <th className="py-2 pr-2 font-medium w-16">Hole</th>
+                  <th className="py-2 pr-2 font-medium w-16">B-Hole</th>
+                  <th className="py-2 pr-2 font-medium w-16">Cutout</th>
+                  <th className="py-2 pr-2 font-medium w-16">B-Cutout</th>
                 </>
               )}
-              <th className="py-2 font-medium w-32 text-right">Final Amount</th>
+              <th className="py-2 pr-2 font-medium w-32 text-right">Final Amount</th>
               <th className="w-8" />
             </tr>
           </thead>
