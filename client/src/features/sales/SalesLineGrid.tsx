@@ -12,6 +12,7 @@ import type { DimensionUnit, RateUnit } from "../../lib/quotationCalc";
 import type { CreateQuotationLine, ProductDto } from "../../lib/types";
 import { useStockSummaryQuery } from "../reports/reportsApi";
 import { parseGlassDimension } from "../../lib/glassDimension";
+import { useListCategoriesQuery, useListSubCategoriesQuery, useListActiveTypesQuery } from "../masters/mastersApi";
 
 /**
  * The line-entry grid shared by Quotations and Sales Orders. Both documents hold the same
@@ -105,6 +106,16 @@ export interface SalesLine {
   bHoleQty: number;
   cutoutQty: number;
   bCutoutQty: number;
+  /** UI-only search aid narrowing the Product dropdown to Category/Sub-Category/Type -- never
+   * sent to the server (not in toCreateLine) and never restored from a saved line (not in
+   * fromSavedLine, which only ever carries productId). Each is independent (Type is not itself
+   * mapped to Sub-Category in the schema -- see Master.Type, TypeId+TypeName only), so all three
+   * narrow the product list as an intersection, not a strict linear chain. Changing a filter never
+   * clears an already-picked Product -- it's a search aid, not the product's own field (contrast
+   * Product Master's own Category/Sub-Category cascade, which genuinely is the product's data). */
+  categoryFilter: number | "";
+  subCategoryFilter: number | "";
+  typeFilter: number | "";
 }
 
 export const emptyLine = (preset: PresetKey = "SHEET_SQM"): SalesLine => ({
@@ -128,6 +139,9 @@ export const emptyLine = (preset: PresetKey = "SHEET_SQM"): SalesLine => ({
   bHoleQty: 0,
   cutoutQty: 0,
   bCutoutQty: 0,
+  categoryFilter: "",
+  subCategoryFilter: "",
+  typeFilter: "",
   ...PRESETS[preset],
 });
 
@@ -232,6 +246,11 @@ export function fromSavedLine(l: SavedLineLike): SalesLine {
     bHoleQty: l.bHoleQty ?? 0,
     cutoutQty: l.cutoutQty ?? 0,
     bCutoutQty: l.bCutoutQty ?? 0,
+    // Search-aid only -- a saved line never carried these, so they start blank (unfiltered);
+    // the already-selected Product still shows correctly regardless.
+    categoryFilter: "",
+    subCategoryFilter: "",
+    typeFilter: "",
   };
 }
 
@@ -376,6 +395,32 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
     return map;
   }, [stockSummary]);
 
+  // Category/Sub-Category/Type filters narrowing each row's own Product dropdown -- fetched once
+  // here (not per row, which would violate the rules of hooks) and filtered client-side per line
+  // below. All three lists are small master tables, so one shared fetch is cheap; a per-row
+  // useListSubCategoriesQuery({categoryId}) would fire N queries on every render of an N-line
+  // quotation for no real benefit.
+  const { data: categories } = useListCategoriesQuery();
+  const { data: allSubCategories } = useListSubCategoriesQuery();
+  const { data: activeTypes } = useListActiveTypesQuery();
+
+  function subCategoryOptionsFor(categoryFilter: number | "") {
+    if (!categoryFilter) return allSubCategories?.items ?? [];
+    return (allSubCategories?.items ?? []).filter((sc) => sc.categoryId === categoryFilter);
+  }
+
+  /** Products offered in this row's dropdown -- every set filter must match; an unset filter
+   * imposes no constraint. Never touches the row's already-selected Product. */
+  function productOptionsFor(l: SalesLine) {
+    const all = products?.items ?? [];
+    return all.filter(
+      (p) =>
+        (!l.categoryFilter || p.categoryId === l.categoryFilter) &&
+        (!l.subCategoryFilter || p.subCategoryId === l.subCategoryFilter) &&
+        (!l.typeFilter || p.typeId === l.typeFilter),
+    );
+  }
+
   function stockShortage(l: SalesLine) {
     if (!l.productId) return null;
     const product = products?.items.find((p) => p.productId === l.productId);
@@ -479,6 +524,58 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                 <tr key={l.key} className="align-top">
                   {/* Product + free-text description + the per-line rules */}
                   <td className="py-2 pr-2">
+                    {/* Category/Sub-Category/Type -- database-driven search aid narrowing the
+                        Product list below, never hard-coded and never sent to the server (see
+                        SalesLine.categoryFilter's own doc comment). */}
+                    <div className="grid grid-cols-3 gap-1 mb-1">
+                      <select
+                        value={l.categoryFilter}
+                        onChange={(e) =>
+                          updateLine(l.key, {
+                            categoryFilter: e.target.value ? Number(e.target.value) : "",
+                            // A stale Sub-Category filter from the previous Category would silently
+                            // hide every product -- clear it the same way Product Master's own
+                            // cascade does.
+                            subCategoryFilter: "",
+                          })
+                        }
+                        className="rounded-md border border-slate-300 px-1.5 py-1 text-[11px]"
+                        title="Filter by Category"
+                      >
+                        <option value="">All Categories</option>
+                        {categories?.items.map((c) => (
+                          <option key={c.categoryId} value={c.categoryId}>
+                            {c.code}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={l.subCategoryFilter}
+                        onChange={(e) => updateLine(l.key, { subCategoryFilter: e.target.value ? Number(e.target.value) : "" })}
+                        className="rounded-md border border-slate-300 px-1.5 py-1 text-[11px]"
+                        title="Filter by Sub-Category"
+                      >
+                        <option value="">All Sub-Cats</option>
+                        {subCategoryOptionsFor(l.categoryFilter).map((sc) => (
+                          <option key={sc.subCategoryId} value={sc.subCategoryId}>
+                            {sc.code}
+                          </option>
+                        ))}
+                      </select>
+                      <select
+                        value={l.typeFilter}
+                        onChange={(e) => updateLine(l.key, { typeFilter: e.target.value ? Number(e.target.value) : "" })}
+                        className="rounded-md border border-slate-300 px-1.5 py-1 text-[11px]"
+                        title="Filter by Type"
+                      >
+                        <option value="">All Types</option>
+                        {activeTypes?.items.map((t) => (
+                          <option key={t.typeId} value={t.typeId}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                     <select
                       value={l.productId || ""}
                       onChange={(e) => {
@@ -488,13 +585,16 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                       className={cellInput}
                     >
                       <option value="">No product (charge line)…</option>
-                      {products?.items.map((p) => (
+                      {productOptionsFor(l).map((p) => (
                         <option key={p.productId} value={p.productId}>
                           {p.code} — {p.description}
                         </option>
                       ))}
                       {onAddNewProduct && <option value="__new__">+ Add New Product…</option>}
                     </select>
+                    {(l.categoryFilter || l.subCategoryFilter || l.typeFilter) && productOptionsFor(l).length === 0 && (
+                      <div className="mt-1 text-[10px] text-amber-600">No products match this filter.</div>
+                    )}
                     {showItemDescription && (
                       <textarea
                         rows={3}
