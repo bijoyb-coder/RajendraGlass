@@ -13,7 +13,8 @@ public static class SalesLinePricing
     public static string? Validate(
         decimal length, decimal width, string dimensionUnit, decimal qty, decimal rate,
         string rateUnit, decimal gstPct, decimal discountPct, decimal chargeRoundingInch,
-        decimal? thicknessMm, decimal? manualArea, decimal? manualBasicAmount)
+        decimal? thicknessMm, decimal? manualArea, decimal? manualBasicAmount,
+        decimal? manualChargeHeightInch = null, decimal? manualChargeWidthInch = null)
     {
         if (!DimensionUnits.IsValid(dimensionUnit))
             return $"Dimension unit must be one of {string.Join(", ", DimensionUnits.All)}.";
@@ -27,12 +28,18 @@ public static class SalesLinePricing
         if (thicknessMm is < 0) return "Thickness cannot be negative.";
         if (manualArea is < 0) return "Area cannot be negative.";
         if (manualBasicAmount is < 0) return "Amount cannot be negative.";
+        if (manualChargeHeightInch is < 0) return "Chargeable height cannot be negative.";
+        if (manualChargeWidthInch is < 0) return "Chargeable width cannot be negative.";
 
-        // Area-priced lines need a real size unless a figure was supplied outright.
+        // Area-priced lines need a real size unless a figure was supplied outright -- either an
+        // area/amount override, or both chargeable dimensions pinned directly (which makes the
+        // measured Length/Width moot). Pinning only one still leaves the other coming from
+        // rounding the real dimension, so that alone doesn't excuse Length/Width being empty.
         bool needsSize = !string.Equals(rateUnit, RateUnits.PerPiece, StringComparison.OrdinalIgnoreCase)
-                         && !manualArea.HasValue && !manualBasicAmount.HasValue;
+                         && !manualArea.HasValue && !manualBasicAmount.HasValue
+                         && !(manualChargeHeightInch.HasValue && manualChargeWidthInch.HasValue);
         if (needsSize && (length <= 0 || width <= 0))
-            return "Length and width must be greater than zero, or supply an area/amount directly.";
+            return "Length and width must be greater than zero, or supply an area/amount/chargeable size directly.";
 
         return null;
     }
@@ -45,7 +52,8 @@ public static class SalesLinePricing
         decimal length, decimal width, string dimensionUnit, decimal qty, decimal rate,
         string rateUnit, bool applyThickness, decimal chargeRoundingInch, decimal gstPct,
         decimal discountPct, decimal? thicknessMm, decimal thicknessFromProduct,
-        decimal? manualArea, decimal? manualBasicAmount)
+        decimal? manualArea, decimal? manualBasicAmount,
+        decimal? manualChargeHeightInch = null, decimal? manualChargeWidthInch = null)
         => QuotationCalculator.Calculate(new LineCalcInput
         {
             Length = length,
@@ -57,6 +65,8 @@ public static class SalesLinePricing
             ThicknessMm = thicknessMm ?? thicknessFromProduct,
             ApplyThickness = applyThickness,
             ChargeRoundingInch = chargeRoundingInch,
+            ManualChargeHeightInch = manualChargeHeightInch,
+            ManualChargeWidthInch = manualChargeWidthInch,
             GstPct = gstPct,
             DiscountPct = discountPct,
             ManualArea = manualArea,
@@ -65,12 +75,13 @@ public static class SalesLinePricing
 
     /// <summary>Audit trail of what the amount was derived from, stored as JSON on the line.</summary>
     public static string Metadata(LineCalcResult calc, decimal thicknessUsed,
-        decimal? manualArea, decimal? manualBasicAmount, decimal discountPct)
+        decimal? manualArea, decimal? manualBasicAmount, decimal discountPct,
+        decimal? manualChargeHeightInch = null, decimal? manualChargeWidthInch = null)
         => System.Text.Json.JsonSerializer.Serialize(new
         {
             entered = new { calc.Length, calc.Width, unit = calc.DimensionUnit, calc.Qty, calc.Rate, rateUnit = calc.RateUnit },
             rules = new { thicknessMm = thicknessUsed, calc.GstPct, discountPct },
-            overrides = new { manualArea, manualBasicAmount },
+            overrides = new { manualArea, manualBasicAmount, manualChargeHeightInch, manualChargeWidthInch },
             computed = new { calc.CalculatedArea, calc.CalculatedBasicAmount, calc.EffectiveRate },
             calc.CalculationMethod,
         });

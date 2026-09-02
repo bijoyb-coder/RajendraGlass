@@ -502,6 +502,9 @@ export interface QuotationLineDto {
   length: number; width: number; dimensionUnit: DimensionUnit
   qty: number; rate: number; rateUnit: RateUnit
   applyThickness: boolean; chargeRoundingInch: number
+  /** Set to bill this dimension at a height/width other than the auto-rounded one -- wins over
+   * chargeRoundingInch for that dimension outright. Either or both may be set. */
+  manualChargeHeightInch?: number | null; manualChargeWidthInch?: number | null
   gstPct: number; discountPct: number
   manualArea?: number | null; manualBasicAmount?: number | null
   /** Item-wise, all optional (default 0). Summed across every line and priced at the document's
@@ -519,6 +522,7 @@ export interface QuotationLineDto {
   gstAmount: number; amount: number
   calculationMethod: CalculationMethod
   isAreaManualOverride: boolean; isAmountManualOverride: boolean
+  isChargeSizeManualOverride: boolean
 }
 export type QuotationDiscountType = 'Percent' | 'Amount'
 export interface QuotationDto {
@@ -560,6 +564,8 @@ export interface CreateQuotationLine {
   length: number; width: number; dimensionUnit: DimensionUnit
   qty: number; rate: number; rateUnit: RateUnit
   applyThickness: boolean; chargeRoundingInch: number
+  manualChargeHeightInch?: number | null
+  manualChargeWidthInch?: number | null
   gstPct: number; discountPct: number
   /** Defaults from the product master when omitted; editable per line. */
   thicknessMm?: number | null
@@ -603,6 +609,7 @@ export interface SalesOrderLineDto {
   length: number; width: number; dimensionUnit: DimensionUnit
   qty: number; rate: number; rateUnit: RateUnit
   applyThickness: boolean; chargeRoundingInch: number
+  manualChargeHeightInch?: number | null; manualChargeWidthInch?: number | null
   gstPct: number; discountPct: number
   thicknessMm?: number | null
   manualArea?: number | null; manualBasicAmount?: number | null
@@ -618,6 +625,7 @@ export interface SalesOrderLineDto {
   value: number
   calculationMethod: CalculationMethod
   isAreaManualOverride: boolean; isAmountManualOverride: boolean
+  isChargeSizeManualOverride: boolean
 }
 export interface SalesOrderDto {
   salesOrderId: number; orderNo?: string | null; customerId: number; customerName?: string | null

@@ -102,7 +102,7 @@ public class CounterInvoicesController(IDbConnectionFactory db, INotificationPub
             var l = req.Lines[i];
             var problem = SalesLinePricing.Validate(l.Length, l.Width, l.DimensionUnit, l.Qty, l.Rate,
                 l.RateUnit, l.GstPct, l.DiscountPct, l.ChargeRoundingInch, l.ThicknessMm,
-                l.ManualArea, l.ManualBasicAmount);
+                l.ManualArea, l.ManualBasicAmount, l.ManualChargeHeightInch, l.ManualChargeWidthInch);
             if (problem is not null)
                 return UnprocessableEntity(new ProblemResponse { Title = $"Line {i + 1}", Status = 422, ErrorCode = "VALIDATION_ERROR", Detail = problem });
         }
@@ -154,7 +154,8 @@ public class CounterInvoicesController(IDbConnectionFactory db, INotificationPub
                 decimal thicknessFromProduct = product.ThicknessMm ?? 0m;
                 var calc = SalesLinePricing.Price(line.Length, line.Width, line.DimensionUnit, line.Qty, line.Rate,
                     line.RateUnit, line.ApplyThickness, line.ChargeRoundingInch, line.GstPct, line.DiscountPct,
-                    line.ThicknessMm, thicknessFromProduct, line.ManualArea, line.ManualBasicAmount);
+                    line.ThicknessMm, thicknessFromProduct, line.ManualArea, line.ManualBasicAmount,
+                    line.ManualChargeHeightInch, line.ManualChargeWidthInch);
 
                 // Stock is not checked here -- a counter sale is allowed to go through even when it
                 // takes Inventory.StockBalance negative (OffcutAllocation.DeductStockAndLogOffcut
@@ -238,17 +239,19 @@ public class CounterInvoicesController(IDbConnectionFactory db, INotificationPub
             {
                 var l = p.Line;
                 var calc = p.Calc;
-                var metadata = SalesLinePricing.Metadata(calc, calc.ThicknessMm, l.ManualArea, l.ManualBasicAmount, l.DiscountPct);
+                var metadata = SalesLinePricing.Metadata(calc, calc.ThicknessMm, l.ManualArea, l.ManualBasicAmount, l.DiscountPct, l.ManualChargeHeightInch, l.ManualChargeWidthInch);
 
                 conn.Execute(
                     @"INSERT INTO Sales.InvoiceLine
                         (InvoiceId, LineNumber, ProductId, Description, Quantity, RatePerUnit, BasicValue, DiscountValue, NetValue, GstRatePct,
                          Length, Width, DimensionUnit, RateUnit, ApplyThickness, ChargeRoundingInch, ThicknessMm, DiscountPct,
-                         ManualArea, ManualBasicAmount, CalculatedArea, Area, AreaUnit, EffectiveRate, CalculationMethod, CalculationMetadata)
+                         ManualArea, ManualBasicAmount, CalculatedArea, Area, AreaUnit, EffectiveRate, CalculationMethod, CalculationMetadata,
+                         ChargeLengthInch, ChargeWidthInch, ManualChargeHeightInch, ManualChargeWidthInch, IsChargeSizeManualOverride)
                       VALUES
                         (@invoiceId, @ln, @ProductId, @Description, @Qty, @Rate, @BasicAmount, @DiscountAmount, @TaxableAmount, @GstPct,
                          @Length, @Width, @DimensionUnit, @RateUnit, @ApplyThickness, @ChargeRoundingInch, @ThicknessMm, @DiscountPct,
-                         @ManualArea, @ManualBasicAmount, @CalculatedArea, @Area, @AreaUnit, @EffectiveRate, @CalculationMethod, @metadata)",
+                         @ManualArea, @ManualBasicAmount, @CalculatedArea, @Area, @AreaUnit, @EffectiveRate, @CalculationMethod, @metadata,
+                         @ChargeLengthInch, @ChargeWidthInch, @ManualChargeHeightInch, @ManualChargeWidthInch, @IsChargeSizeManualOverride)",
                     new
                     {
                         invoiceId,
@@ -277,6 +280,11 @@ public class CounterInvoicesController(IDbConnectionFactory db, INotificationPub
                         calc.EffectiveRate,
                         calc.CalculationMethod,
                         metadata,
+                        calc.ChargeLengthInch,
+                        calc.ChargeWidthInch,
+                        l.ManualChargeHeightInch,
+                        l.ManualChargeWidthInch,
+                        calc.IsChargeSizeManualOverride,
                     }, tx);
 
                 // A cut piece can come from an existing leftover before touching a full sheet — and

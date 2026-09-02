@@ -91,6 +91,9 @@ export interface SalesLine {
   rateUnit: RateUnit;
   applyThickness: boolean;
   chargeRoundingInch: number;
+  /** null = follow the auto-rounding; a number = operator override of that one dimension. */
+  manualChargeHeightInch: number | null;
+  manualChargeWidthInch: number | null;
   gstPct: number;
   discountPct: number;
   /** null = follow the calculation; a number = operator override. */
@@ -115,6 +118,8 @@ export const emptyLine = (preset: PresetKey = "SHEET_SQM"): SalesLine => ({
   widthText: "",
   qty: 1,
   rate: 0,
+  manualChargeHeightInch: null,
+  manualChargeWidthInch: null,
   gstPct: DEFAULT_GST_PCT,
   discountPct: 0,
   manualArea: null,
@@ -153,6 +158,8 @@ export function calcLine(l: SalesLine, showGst = true, showItemDiscount = true) 
     thicknessMm: l.thicknessMm,
     applyThickness: l.applyThickness,
     chargeRoundingInch: l.chargeRoundingInch,
+    manualChargeHeightInch: l.manualChargeHeightInch,
+    manualChargeWidthInch: l.manualChargeWidthInch,
     gstPct: showGst ? l.gstPct : 0,
     discountPct: showItemDiscount ? l.discountPct : 0,
     manualArea: l.manualArea,
@@ -166,6 +173,9 @@ export function isComplete(l: SalesLine) {
   if (l.manualBasicAmount != null) return true;
   if (l.rateUnit === "PER_PIECE") return l.rate > 0;
   if (l.manualArea != null) return l.rate > 0;
+  // Pinning both chargeable dimensions directly makes the measured Length/Width moot, the same
+  // way a manual area does.
+  if (l.manualChargeHeightInch != null && l.manualChargeWidthInch != null) return l.rate > 0;
   return l.length > 0 && l.width > 0 && l.rate > 0;
 }
 
@@ -181,6 +191,8 @@ interface SavedLineLike {
   rateUnit: RateUnit
   applyThickness: boolean
   chargeRoundingInch: number
+  manualChargeHeightInch?: number | null
+  manualChargeWidthInch?: number | null
   gstPct: number
   discountPct: number
   thicknessMm?: number | null
@@ -210,6 +222,8 @@ export function fromSavedLine(l: SavedLineLike): SalesLine {
     rateUnit: l.rateUnit,
     applyThickness: l.applyThickness,
     chargeRoundingInch: l.chargeRoundingInch,
+    manualChargeHeightInch: l.manualChargeHeightInch ?? null,
+    manualChargeWidthInch: l.manualChargeWidthInch ?? null,
     gstPct: l.gstPct,
     discountPct: l.discountPct,
     manualArea: l.manualArea ?? null,
@@ -233,6 +247,8 @@ export function toCreateLine(l: SalesLine): CreateQuotationLine {
     rateUnit: l.rateUnit,
     applyThickness: l.applyThickness,
     chargeRoundingInch: l.chargeRoundingInch,
+    manualChargeHeightInch: l.manualChargeHeightInch,
+    manualChargeWidthInch: l.manualChargeWidthInch,
     gstPct: l.gstPct,
     discountPct: l.discountPct,
     thicknessMm: l.thicknessMm,
@@ -424,7 +440,8 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
               <th className="py-2 font-medium w-24">Length</th>
               <th className="py-2 font-medium w-24">Width</th>
               <th className="py-2 font-medium w-24">Unit</th>
-              <th className="py-2 font-medium w-28">Chargeable Size</th>
+              <th className="py-2 font-medium w-24">Charge Height</th>
+              <th className="py-2 font-medium w-24">Charge Width</th>
               <th className="py-2 font-medium w-20">Qty</th>
               <th className="py-2 font-medium w-28">Area</th>
               <th className="py-2 font-medium w-24">Rate</th>
@@ -580,20 +597,68 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                     </select>
                   </td>
 
-                  {/* Chargeable size -- the dimensions actually billed, after rounding each up to
-                      the next multiple of chargeRoundingInch (Sheet3's inch rows use 6", but any
-                      step works the same way, e.g. 3" -- see QuotationCalculator.RoundUpToStep).
-                      Equal to the entered Length/Width when rounding is off. */}
-                  <td className="py-2 pr-2 text-slate-600">
+                  {/* Chargeable Height/Width -- the dimensions actually billed. Each defaults to
+                      the auto-rounded figure (rounded up to the next multiple of chargeRoundingInch,
+                      e.g. 3"/6" -- see QuotationCalculator.RoundUpToStep; equal to the entered
+                      Length/Width when rounding is off), but the operator can type an exact value
+                      directly, overriding that one dimension outright. Amount = Rate x (Charge
+                      Height x Charge Width), same as any other area-priced line. */}
+                  <td className="py-2 pr-2">
                     {perPiece ? (
-                      "n/a"
+                      <span className="text-slate-400">n/a</span>
                     ) : (
                       <>
-                        {num(c.chargeLengthInch, 2)}&quot; × {num(c.chargeWidthInch, 2)}&quot;
-                        {l.chargeRoundingInch > 0 && (
-                          <div className="mt-0.5 text-[10px] text-brand-600 font-semibold">
-                            rounded to {l.chargeRoundingInch}&quot;
-                          </div>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={l.manualChargeHeightInch ?? Number(c.chargeLengthInch.toFixed(2))}
+                          onChange={(e) =>
+                            updateLine(l.key, {
+                              manualChargeHeightInch: e.target.value === "" ? null : Number(e.target.value),
+                            })
+                          }
+                          className={l.manualChargeHeightInch != null ? overriddenInput : cellInput}
+                        />
+                        {l.manualChargeHeightInch != null && (
+                          <button
+                            type="button"
+                            title="Reset to the rounded height"
+                            onClick={() => updateLine(l.key, { manualChargeHeightInch: null })}
+                            className="mt-0.5 inline-flex items-center gap-0.5 text-[10px] text-amber-700 hover:text-amber-900 font-medium"
+                          >
+                            <RotateCcw size={10} /> reset
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </td>
+                  <td className="py-2 pr-2">
+                    {perPiece ? (
+                      <span className="text-slate-400">n/a</span>
+                    ) : (
+                      <>
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={l.manualChargeWidthInch ?? Number(c.chargeWidthInch.toFixed(2))}
+                          onChange={(e) =>
+                            updateLine(l.key, {
+                              manualChargeWidthInch: e.target.value === "" ? null : Number(e.target.value),
+                            })
+                          }
+                          className={l.manualChargeWidthInch != null ? overriddenInput : cellInput}
+                        />
+                        {l.manualChargeWidthInch != null && (
+                          <button
+                            type="button"
+                            title="Reset to the rounded width"
+                            onClick={() => updateLine(l.key, { manualChargeWidthInch: null })}
+                            className="mt-0.5 inline-flex items-center gap-0.5 text-[10px] text-amber-700 hover:text-amber-900 font-medium"
+                          >
+                            <RotateCcw size={10} /> reset
+                          </button>
                         )}
                       </>
                     )}

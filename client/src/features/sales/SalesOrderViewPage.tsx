@@ -135,8 +135,12 @@ export default function SalesOrderViewPage() {
                   <td className="py-2.5 text-slate-500">{l.rateUnit === 'PER_PIECE' ? '—' : l.dimensionUnit}</td>
                   <td className="py-2.5 text-right text-slate-700">
                     {l.rateUnit === 'PER_PIECE' ? '—' : `${l.chargeLengthInch.toFixed(2)}" × ${l.chargeWidthInch.toFixed(2)}"`}
-                    {l.rateUnit !== 'PER_PIECE' && chargeNote(l) && (
-                      <div className="text-[11px] text-slate-400">rounded to {l.chargeRoundingInch}&quot;</div>
+                    {l.rateUnit !== 'PER_PIECE' && (
+                      l.isChargeSizeManualOverride ? (
+                        <div className="text-[11px] text-amber-600">manual</div>
+                      ) : chargeNote(l) ? (
+                        <div className="text-[11px] text-slate-400">rounded to {l.chargeRoundingInch}&quot;</div>
+                      ) : null
                     )}
                   </td>
                   <td className="py-2.5 text-right text-slate-700">{num(l.qty, 2)}</td>
