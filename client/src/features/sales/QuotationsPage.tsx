@@ -92,7 +92,6 @@ interface QuotationDraft {
   newCustomerMode: boolean;
   newCustomer: NewCustomerRequest;
   lines: SalesLine[];
-  description: string;
   holeRate: number;
   bHoleRate: number;
   cutoutRate: number;
@@ -122,9 +121,6 @@ export default function QuotationsPage() {
   const [newCustomer, setNewCustomer] =
     useState<NewCustomerRequest>(emptyNewCustomer);
   const [lines, setLines] = useState<SalesLine[]>([emptyLine()]);
-  // One free-text field for the whole quotation -- not per line (see SalesLineGrid's
-  // showItemDescription={false} below).
-  const [description, setDescription] = useState("");
   // One rate per hole/cutout type, entered once for the whole document -- not per line. Applied
   // to the sum of every line's own item-wise Hole/B-Hole/Cutout/B-Cutout quantity.
   const [holeRate, setHoleRate] = useState(0);
@@ -156,7 +152,6 @@ export default function QuotationsPage() {
     setNewCustomerMode(draft.newCustomerMode);
     setNewCustomer(draft.newCustomer);
     setLines(draft.lines);
-    setDescription(draft.description);
     setHoleRate(draft.holeRate);
     setBHoleRate(draft.bHoleRate);
     setCutoutRate(draft.cutoutRate);
@@ -197,7 +192,7 @@ export default function QuotationsPage() {
    * as it always has -- no redirect back here. */
   function handleAddNewProduct(lineKey: string) {
     const draft: QuotationDraft = {
-      editingId, customerId, newCustomerMode, newCustomer, lines, description,
+      editingId, customerId, newCustomerMode, newCustomer, lines,
       holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue,
     };
     navigate("/masters/products", { state: { returnTo: "quotation", targetLineKey: lineKey, draft } });
@@ -241,7 +236,6 @@ export default function QuotationsPage() {
   function resetForm() {
     setEditingId(null);
     setLines([emptyLine()]);
-    setDescription("");
     setCustomerId("");
     setNewCustomerMode(false);
     setNewCustomer(emptyNewCustomer);
@@ -265,7 +259,6 @@ export default function QuotationsPage() {
     setCustomerId(full.customerId);
     setNewCustomerMode(false);
     setLines(full.lines.length ? full.lines.map(fromSavedLine) : [emptyLine()]);
-    setDescription(full.description ?? "");
     setHoleRate(full.holeRate);
     setBHoleRate(full.bHoleRate);
     setCutoutRate(full.cutoutRate);
@@ -319,7 +312,7 @@ export default function QuotationsPage() {
       if (editingId) {
         await updateQuotation({
           id: editingId,
-          body: { customerId: Number(customerId), lines: payload, description, holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue },
+          body: { customerId: Number(customerId), lines: payload, holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue },
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -328,7 +321,6 @@ export default function QuotationsPage() {
           customerId: newCustomerMode ? 0 : Number(customerId),
           newCustomer: newCustomerMode ? newCustomer : undefined,
           lines: payload,
-          description,
           holeRate,
           bHoleRate,
           cutoutRate,
@@ -547,30 +539,15 @@ export default function QuotationsPage() {
             </div>
           )}
 
-          {/* ---------- Description ---------- */}
-          {/* One field for the whole quotation, not per line -- see showItemDescription={false}
-              on the grid below. */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">
-              Description
-            </label>
-            <textarea
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder="Notes for this quotation…"
-              className={inputClass}
-            />
-          </div>
-
           {/* ---------- Lines ---------- */}
-          {/* Shared with the Sales Order screen so the two can never drift apart. */}
+          {/* Shared with the Sales Order screen so the two can never drift apart. Description is
+              item-wise here (the grid's default) -- entered per line, not once for the whole
+              document. */}
           <SalesLineGrid
             lines={lines}
             products={products}
             onChange={setLines}
             showGst={false}
-            showItemDescription={false}
             onAddNewProduct={handleAddNewProduct}
             roundOff={{ enabled: roundOffEnabled, onChange: setRoundOffEnabled }}
             discount={{
