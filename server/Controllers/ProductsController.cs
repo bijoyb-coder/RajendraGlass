@@ -49,16 +49,31 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
             AND NOT EXISTS (SELECT 1 FROM Inventory.RackStock x WHERE x.ProductId = p.ProductId AND x.QtyOnHand <> 0)
           THEN 1 ELSE 0 END AS BIT)";
 
+    /// <summary>Every Product row's Select shares this shape -- Category/Sub-Category/Type are
+    /// always re-joined for display (never trusted from a stored free-text copy), and CurrentStock
+    /// is the live sum across every Godown, kept deliberately separate from OpeningBalance (which
+    /// never changes after Create).</summary>
+    private const string SelectColumns =
+        @"p.ProductId, p.Code, p.Description, p.Category, p.Brand, p.ThicknessMm, p.Colour, p.HsnCode, p.GstRatePct,
+          p.StockUnit, p.SellingUnit, p.StandardSheetLengthMm, p.StandardSheetWidthMm, p.PurchaseRate, p.SellingRate, p.MinSellingPrice, p.IsActive,
+          p.CategoryId, c.Code AS CategoryCode, c.Name AS CategoryName,
+          p.SubCategoryId, sc.Code AS SubCategoryCode, sc.Name AS SubCategoryName,
+          p.TypeId, t.Name AS TypeName,
+          p.OpeningBalance,
+          (SELECT SUM(sb.QtyOnHand) FROM Inventory.StockBalance sb WHERE sb.ProductId = p.ProductId) AS CurrentStock";
+
+    private const string Joins =
+        @"LEFT JOIN Master.Category c ON c.CategoryId = p.CategoryId
+          LEFT JOIN Master.SubCategory sc ON sc.SubCategoryId = p.SubCategoryId
+          LEFT JOIN Master.Type t ON t.TypeId = p.TypeId";
+
     [HttpGet]
     public IActionResult List([FromQuery] string? search, [FromQuery] bool activeOnly = true)
     {
         using var conn = db.CreateConnection();
-        var sql = $@"SELECT p.ProductId, p.Code, p.Description, p.Category, p.Brand, p.ThicknessMm, p.Colour, p.HsnCode, p.GstRatePct,
-                            p.StockUnit, p.SellingUnit, p.StandardSheetLengthMm, p.StandardSheetWidthMm, p.PurchaseRate, p.SellingRate, p.MinSellingPrice, p.IsActive,
-                            p.CategoryId, c.Code AS CategoryCode, c.Name AS CategoryName,
-                            {CanDeleteSql} AS CanDelete
+        var sql = $@"SELECT {SelectColumns}, {CanDeleteSql} AS CanDelete
                      FROM Master.Product p
-                     LEFT JOIN Master.Category c ON c.CategoryId = p.CategoryId
+                     {Joins}
                      WHERE (@activeOnly = 0 OR p.IsActive = 1)
                        AND (@search IS NULL OR p.Code LIKE '%' + @search + '%' OR p.Description LIKE '%' + @search + '%')
                      ORDER BY p.Description";
@@ -72,16 +87,44 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
     {
         using var conn = db.CreateConnection();
         var product = conn.QueryFirstOrDefault<ProductDto>(
-            $@"SELECT p.ProductId, p.Code, p.Description, p.Category, p.Brand, p.ThicknessMm, p.Colour, p.HsnCode, p.GstRatePct,
-                     p.StockUnit, p.SellingUnit, p.StandardSheetLengthMm, p.StandardSheetWidthMm, p.PurchaseRate, p.SellingRate, p.MinSellingPrice, p.IsActive,
-                     p.CategoryId, c.Code AS CategoryCode, c.Name AS CategoryName,
-                     {CanDeleteSql} AS CanDelete
+            $@"SELECT {SelectColumns}, {CanDeleteSql} AS CanDelete
               FROM Master.Product p
-              LEFT JOIN Master.Category c ON c.CategoryId = p.CategoryId
+              {Joins}
               WHERE p.ProductId = @id", new { id });
         if (product is null) return NotFound();
         if (!CanViewCost) product.PurchaseRate = null;
         return Ok(product);
+    }
+
+    /// <summary>Validates CategoryId/SubCategoryId/TypeId exactly as the client's own cascading
+    /// dropdowns would have constrained them -- never trusts a raw id sent from the browser. Returns
+    /// a ProblemResponse to short-circuit with, or null when everything checks out.</summary>
+    private ProblemResponse? ValidateCategoryLinks(System.Data.IDbConnection conn, System.Data.IDbTransaction? tx, ProductDto dto)
+    {
+        if (dto.CategoryId.HasValue)
+        {
+            var category = conn.QueryFirstOrDefault("SELECT CategoryId FROM Master.Category WHERE CategoryId = @id AND IsActive = 1", new { id = dto.CategoryId.Value }, tx);
+            if (category is null)
+                return new ProblemResponse { Title = "Invalid Category", Status = 422, ErrorCode = "CATEGORY_NOT_FOUND", Detail = "The selected category does not exist or is inactive." };
+        }
+        if (dto.SubCategoryId.HasValue)
+        {
+            var subCategory = conn.QueryFirstOrDefault("SELECT CategoryId FROM Master.SubCategory WHERE SubCategoryId = @id AND IsActive = 1", new { id = dto.SubCategoryId.Value }, tx);
+            if (subCategory is null)
+                return new ProblemResponse { Title = "Invalid Sub-Category", Status = 422, ErrorCode = "SUBCATEGORY_NOT_FOUND", Detail = "The selected sub-category does not exist or is inactive." };
+            // The sub-category must belong to the selected category -- a mismatched combo can only
+            // reach here via a direct API call (the UI's cascading dropdown never offers one), but it
+            // must still be rejected.
+            if (!dto.CategoryId.HasValue || (int)subCategory.CategoryId != dto.CategoryId.Value)
+                return new ProblemResponse { Title = "Category mismatch", Status = 422, ErrorCode = "SUBCATEGORY_MISMATCH", Detail = "Selected Sub-Category does not belong to the selected Category." };
+        }
+        if (dto.TypeId.HasValue)
+        {
+            var type = conn.QueryFirstOrDefault("SELECT TypeId FROM Master.Type WHERE TypeId = @id AND IsActive = 1", new { id = dto.TypeId.Value }, tx);
+            if (type is null)
+                return new ProblemResponse { Title = "Invalid Type", Status = 422, ErrorCode = "TYPE_NOT_FOUND", Detail = "The selected type does not exist or is inactive." };
+        }
+        return null;
     }
 
     [HttpPost]
@@ -92,6 +135,8 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
             return UnprocessableEntity(new ProblemResponse { Title = "Code required", Status = 422, ErrorCode = "CODE_REQUIRED", Detail = "Product code is required." });
         if (string.IsNullOrWhiteSpace(dto.Description))
             return UnprocessableEntity(new ProblemResponse { Title = "Description required", Status = 422, ErrorCode = "DESCRIPTION_REQUIRED", Detail = "Product description is required." });
+        if (dto.OpeningBalance.HasValue && dto.OpeningBalance.Value < 0)
+            return UnprocessableEntity(new ProblemResponse { Title = "Invalid Opening Balance", Status = 422, ErrorCode = "OPENING_BALANCE_NEGATIVE", Detail = "Opening Balance cannot be negative." });
 
         using var conn = db.CreateConnection();
         var existing = conn.QueryFirstOrDefault<int?>("SELECT ProductId FROM Master.Product WHERE Code = @Code", new { dto.Code });
@@ -100,32 +145,85 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
             return Conflict(new ProblemResponse { Title = "Duplicate code", Status = 409, ErrorCode = "DUPLICATE_CODE", Detail = $"A product with code '{dto.Code}' already exists." });
         }
 
-        // CategoryId is optional (not every product has been assigned one), but when supplied it
-        // must name a real, active Category -- the dropdown only ever offers real ones, but a
-        // direct API call must not be able to smuggle in a dangling reference.
-        if (dto.CategoryId.HasValue)
-        {
-            var category = conn.QueryFirstOrDefault("SELECT Code, Name FROM Master.Category WHERE CategoryId = @id AND IsActive = 1", new { id = dto.CategoryId.Value });
-            if (category is null)
-                return UnprocessableEntity(new ProblemResponse { Title = "Invalid Category", Status = 422, ErrorCode = "CATEGORY_NOT_FOUND", Detail = "The selected category does not exist or is inactive." });
-        }
+        var linkError = ValidateCategoryLinks(conn, null, dto);
+        if (linkError is not null) return UnprocessableEntity(linkError);
 
+        // A nonzero Opening Balance must land somewhere real -- it drives an actual
+        // Inventory.StockOpening document (see below), which needs a Godown.
+        bool hasOpeningBalance = dto.OpeningBalance.HasValue && dto.OpeningBalance.Value > 0;
+        if (hasOpeningBalance && !dto.OpeningBalanceGodownId.HasValue)
+            return UnprocessableEntity(new ProblemResponse { Title = "Godown required", Status = 422, ErrorCode = "OPENING_BALANCE_GODOWN_REQUIRED", Detail = "Please select a Godown for the Opening Balance." });
+
+        using var tx = conn.BeginTransaction();
         try
         {
+            if (hasOpeningBalance)
+            {
+                var godown = conn.QueryFirstOrDefault("SELECT GodownId FROM Company.Godown WHERE GodownId = @id AND IsActive = 1", new { id = dto.OpeningBalanceGodownId!.Value }, tx);
+                if (godown is null)
+                {
+                    tx.Rollback();
+                    return UnprocessableEntity(new ProblemResponse { Title = "Invalid Godown", Status = 422, ErrorCode = "GODOWN_NOT_FOUND", Detail = "The selected godown does not exist or is inactive." });
+                }
+            }
+
             var id = conn.ExecuteScalar<int>(
-                @"INSERT INTO Master.Product (Code, Description, Category, CategoryId, Brand, ThicknessMm, Colour, HsnCode, GstRatePct, StockUnit, SellingUnit, StandardSheetLengthMm, StandardSheetWidthMm, PurchaseRate, SellingRate, MinSellingPrice, IsActive)
+                @"INSERT INTO Master.Product (Code, Description, Category, CategoryId, SubCategoryId, TypeId, OpeningBalance, Brand, ThicknessMm, Colour, HsnCode, GstRatePct, StockUnit, SellingUnit, StandardSheetLengthMm, StandardSheetWidthMm, PurchaseRate, SellingRate, MinSellingPrice, IsActive)
                   OUTPUT INSERTED.ProductId
-                  VALUES (@Code, @Description, @Category, @CategoryId, @Brand, @ThicknessMm, @Colour, @HsnCode, @GstRatePct, @StockUnit, @SellingUnit, @StandardSheetLengthMm, @StandardSheetWidthMm, @PurchaseRate, @SellingRate, @MinSellingPrice, 1)",
-                dto);
+                  VALUES (@Code, @Description, @Category, @CategoryId, @SubCategoryId, @TypeId, @OpeningBalance, @Brand, @ThicknessMm, @Colour, @HsnCode, @GstRatePct, @StockUnit, @SellingUnit, @StandardSheetLengthMm, @StandardSheetWidthMm, @PurchaseRate, @SellingRate, @MinSellingPrice, 1)",
+                dto, tx);
+
+            // Post the Opening Balance through the exact same mechanism as every other opening-stock
+            // entry in this app (InventoryController.CreateStockOpening) -- one StockOpening
+            // document, one StockBalance increment, one StockMovement row. Product.OpeningBalance
+            // itself is never separately summed into StockBalance, so this can never double-count.
+            if (hasOpeningBalance)
+            {
+                int godownId = dto.OpeningBalanceGodownId!.Value;
+                int branchId = DocNumbering.DefaultBranchId(conn, tx);
+                string openingNo = DocNumbering.NextNumber(conn, tx, branchId, "StockOpening");
+                var qty = dto.OpeningBalance!.Value;
+
+                var openingId = conn.ExecuteScalar<int>(
+                    @"INSERT INTO Inventory.StockOpening (OpeningNo, GodownId, Remarks, Status)
+                      OUTPUT INSERTED.StockOpeningId
+                      VALUES (@openingNo, @godownId, @remarks, 'Posted')",
+                    new { openingNo, godownId, remarks = $"Opening balance recorded for product {dto.Code}" }, tx);
+
+                conn.Execute(
+                    "INSERT INTO Inventory.StockOpeningLine (StockOpeningId, ProductId, Qty, AreaSqm) VALUES (@openingId, @productId, @qty, @qty)",
+                    new { openingId, productId = id, qty }, tx);
+
+                var balance = conn.QueryFirstOrDefault(
+                    "SELECT StockBalanceId FROM Inventory.StockBalance WHERE ProductId = @productId AND GodownId = @godownId",
+                    new { productId = id, godownId }, transaction: tx);
+                if (balance is null)
+                    conn.Execute("INSERT INTO Inventory.StockBalance (ProductId, GodownId, QtyOnHand) VALUES (@productId, @godownId, @qty)", new { productId = id, godownId, qty }, tx);
+                else
+                    conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand + @qty WHERE StockBalanceId = @id", new { qty, id = (int)balance.StockBalanceId }, tx);
+
+                conn.Execute(
+                    @"INSERT INTO Inventory.StockMovement (ProductId, GodownId, MovementType, DocType, DocId, Qty)
+                      VALUES (@productId, @godownId, 'Opening', 'StockOpening', @openingId, @qty)",
+                    new { productId = id, godownId, openingId, qty }, tx);
+            }
+
+            tx.Commit();
             dto.ProductId = id;
             return CreatedAtAction(nameof(Get), new { id }, dto);
         }
         catch (Microsoft.Data.SqlClient.SqlException ex)
         {
+            tx.Rollback();
             return UnprocessableEntity(new ProblemResponse { Title = "Could not save", Status = 422, ErrorCode = "SAVE_FAILED", Detail = ex.Message });
         }
     }
 
+    /// <summary>Never touches OpeningBalance or triggers any stock movement -- Opening Balance is an
+    /// initial stock value set once at Create, not a continuously editable quantity. Correcting a
+    /// product's actual stock on hand goes through the existing Stock Adjustment feature
+    /// (InventoryController.CreateStockAdjustment), which carries its own audit trail; Product
+    /// Master's Edit form only ever changes descriptive fields.</summary>
     [HttpPut("{id:int}")]
     [RequirePermission("Product.Create")]
     public IActionResult Update(int id, [FromBody] ProductDto dto)
@@ -135,21 +233,17 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
 
         using var conn = db.CreateConnection();
 
-        if (dto.CategoryId.HasValue)
-        {
-            var category = conn.QueryFirstOrDefault("SELECT Code, Name FROM Master.Category WHERE CategoryId = @id AND IsActive = 1", new { id = dto.CategoryId.Value });
-            if (category is null)
-                return UnprocessableEntity(new ProblemResponse { Title = "Invalid Category", Status = 422, ErrorCode = "CATEGORY_NOT_FOUND", Detail = "The selected category does not exist or is inactive." });
-        }
+        var linkError = ValidateCategoryLinks(conn, null, dto);
+        if (linkError is not null) return UnprocessableEntity(linkError);
 
         try
         {
             var rows = conn.Execute(
-                @"UPDATE Master.Product SET Description=@Description, Category=@Category, CategoryId=@CategoryId, Brand=@Brand, ThicknessMm=@ThicknessMm,
+                @"UPDATE Master.Product SET Description=@Description, Category=@Category, CategoryId=@CategoryId, SubCategoryId=@SubCategoryId, TypeId=@TypeId, Brand=@Brand, ThicknessMm=@ThicknessMm,
                          Colour=@Colour, HsnCode=@HsnCode, GstRatePct=@GstRatePct, StockUnit=@StockUnit, SellingUnit=@SellingUnit,
                          StandardSheetLengthMm=@StandardSheetLengthMm, StandardSheetWidthMm=@StandardSheetWidthMm,
                          PurchaseRate=@PurchaseRate, SellingRate=@SellingRate, MinSellingPrice=@MinSellingPrice
-                  WHERE ProductId=@id", new { id, dto.Description, dto.Category, dto.CategoryId, dto.Brand, dto.ThicknessMm, dto.Colour, dto.HsnCode, dto.GstRatePct, dto.StockUnit, dto.SellingUnit, dto.StandardSheetLengthMm, dto.StandardSheetWidthMm, dto.PurchaseRate, dto.SellingRate, dto.MinSellingPrice });
+                  WHERE ProductId=@id", new { id, dto.Description, dto.Category, dto.CategoryId, dto.SubCategoryId, dto.TypeId, dto.Brand, dto.ThicknessMm, dto.Colour, dto.HsnCode, dto.GstRatePct, dto.StockUnit, dto.SellingUnit, dto.StandardSheetLengthMm, dto.StandardSheetWidthMm, dto.PurchaseRate, dto.SellingRate, dto.MinSellingPrice });
             return rows == 0 ? NotFound() : NoContent();
         }
         catch (Microsoft.Data.SqlClient.SqlException ex)

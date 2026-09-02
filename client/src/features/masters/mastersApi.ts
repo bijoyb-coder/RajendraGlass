@@ -1,5 +1,5 @@
 import { api } from '../../app/api'
-import type { CompanyDto, CustomerDto, ProductDto, TransporterDto, VehicleDto, SubCategoryDto, CategoryDto } from '../../lib/types'
+import type { CompanyDto, CustomerDto, ProductDto, TransporterDto, VehicleDto, SubCategoryDto, CategoryDto, TypeDto } from '../../lib/types'
 
 export const mastersApi = api.injectEndpoints({
   endpoints: (builder) => ({
@@ -18,7 +18,9 @@ export const mastersApi = api.injectEndpoints({
     }),
     createProduct: builder.mutation<ProductDto, Partial<ProductDto>>({
       query: (body) => ({ url: '/products', method: 'POST', body }),
-      invalidatesTags: ['Product'],
+      // A nonzero Opening Balance posts a real Inventory.StockOpening document — see
+      // ProductsController.Create — so Stock-related caches need invalidating too.
+      invalidatesTags: ['Product', 'Stock', 'StockOpening'],
     }),
     updateProduct: builder.mutation<void, { id: number; body: Partial<ProductDto> }>({
       query: ({ id, body }) => ({ url: `/products/${id}`, method: 'PUT', body }),
@@ -54,35 +56,14 @@ export const mastersApi = api.injectEndpoints({
       query: (transporterId) => `/transporters/${transporterId}/vehicles`,
     }),
 
-    // Sub-Category Master. Also reused by the Category page's Sub-Category dropdown — one list,
-    // no separate "/active" endpoint (see server/Controllers/CategoryController.cs).
-    listSubCategories: builder.query<{ items: SubCategoryDto[] }, { search?: string } | void>({
-      query: (args) => ({ url: '/subcategories', params: args ?? {} }),
-      providesTags: ['SubCategory'],
-    }),
-    createSubCategory: builder.mutation<SubCategoryDto, Partial<SubCategoryDto>>({
-      query: (body) => ({ url: '/subcategories', method: 'POST', body }),
-      invalidatesTags: ['SubCategory'],
-    }),
-    updateSubCategory: builder.mutation<void, { id: number; body: Partial<SubCategoryDto> }>({
-      query: ({ id, body }) => ({ url: `/subcategories/${id}`, method: 'PUT', body }),
-      invalidatesTags: ['SubCategory'],
-    }),
-    deleteSubCategory: builder.mutation<void, number>({
-      query: (id) => ({ url: `/subcategories/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['SubCategory'],
-    }),
-
-    // Category Master.
+    // Category Master — the parent side of Category → Sub-Category.
     listCategories: builder.query<{ items: CategoryDto[] }, { search?: string } | void>({
       query: (args) => ({ url: '/categories', params: args ?? {} }),
       providesTags: ['Category'],
     }),
     createCategory: builder.mutation<CategoryDto, Partial<CategoryDto>>({
       query: (body) => ({ url: '/categories', method: 'POST', body }),
-      // A new Category never changes what any Sub-Category dropdown option looks like, but it
-      // does change canDelete on its own Sub-Category's row in the SubCategories grid.
-      invalidatesTags: ['Category', 'SubCategory'],
+      invalidatesTags: ['Category'],
     }),
     updateCategory: builder.mutation<void, { id: number; body: Partial<CategoryDto> }>({
       query: ({ id, body }) => ({ url: `/categories/${id}`, method: 'PUT', body }),
@@ -90,7 +71,56 @@ export const mastersApi = api.injectEndpoints({
     }),
     deleteCategory: builder.mutation<void, number>({
       query: (id) => ({ url: `/categories/${id}`, method: 'DELETE' }),
-      invalidatesTags: ['Category', 'SubCategory'],
+      invalidatesTags: ['Category'],
+    }),
+
+    // Sub-Category Master — the child side. Also reused by Product Master's cascading dropdown via
+    // the optional categoryId filter — one list, no separate "/categories/{id}/subcategories" route
+    // (see server/Controllers/CategoryController.cs).
+    listSubCategories: builder.query<{ items: SubCategoryDto[] }, { search?: string; categoryId?: number } | void>({
+      query: (args) => ({ url: '/subcategories', params: args ?? {} }),
+      providesTags: ['SubCategory'],
+    }),
+    createSubCategory: builder.mutation<SubCategoryDto, Partial<SubCategoryDto>>({
+      query: (body) => ({ url: '/subcategories', method: 'POST', body }),
+      // A new Sub-Category changes what its parent Category's canDelete looks like too.
+      invalidatesTags: ['SubCategory', 'Category'],
+    }),
+    updateSubCategory: builder.mutation<void, { id: number; body: Partial<SubCategoryDto> }>({
+      query: ({ id, body }) => ({ url: `/subcategories/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['SubCategory', 'Category'],
+    }),
+    deleteSubCategory: builder.mutation<void, number>({
+      query: (id) => ({ url: `/subcategories/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['SubCategory', 'Category'],
+    }),
+
+    // Type Master. Deliberately just typeId + name (see server/Controllers/TypeController.cs) --
+    // no Code column, unlike Category/SubCategory. Never physically deletable once a Product
+    // references it, so lifecycle is Activate/Deactivate, not Delete.
+    listTypes: builder.query<{ items: TypeDto[] }, { search?: string } | void>({
+      query: (args) => ({ url: '/types', params: args ?? {} }),
+      providesTags: ['Type'],
+    }),
+    listActiveTypes: builder.query<{ items: TypeDto[] }, void>({
+      query: () => '/types/active',
+      providesTags: ['Type'],
+    }),
+    createType: builder.mutation<TypeDto, Partial<TypeDto>>({
+      query: (body) => ({ url: '/types', method: 'POST', body }),
+      invalidatesTags: ['Type'],
+    }),
+    updateType: builder.mutation<void, { id: number; body: Partial<TypeDto> }>({
+      query: ({ id, body }) => ({ url: `/types/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['Type'],
+    }),
+    deactivateType: builder.mutation<void, number>({
+      query: (id) => ({ url: `/types/${id}/deactivate`, method: 'POST' }),
+      invalidatesTags: ['Type'],
+    }),
+    activateType: builder.mutation<void, number>({
+      query: (id) => ({ url: `/types/${id}/activate`, method: 'POST' }),
+      invalidatesTags: ['Type'],
     }),
   }),
 })
@@ -116,4 +146,10 @@ export const {
   useCreateCategoryMutation,
   useUpdateCategoryMutation,
   useDeleteCategoryMutation,
+  useListTypesQuery,
+  useListActiveTypesQuery,
+  useCreateTypeMutation,
+  useUpdateTypeMutation,
+  useDeactivateTypeMutation,
+  useActivateTypeMutation,
 } = mastersApi

@@ -30,6 +30,25 @@ export interface ProductDto {
   categoryId?: number | null
   categoryCode?: string | null
   categoryName?: string | null
+  /** The database-driven Sub-Category Master link — must belong to the selected Category (enforced
+   * server-side). subCategoryCode/subCategoryName are read-only, joined from Master.SubCategory. */
+  subCategoryId?: number | null
+  subCategoryCode?: string | null
+  subCategoryName?: string | null
+  /** The database-driven Type Master link. typeName is read-only, joined from Master.Type. */
+  typeId?: number | null
+  typeName?: string | null
+  /** The quantity this product started with, in stockUnit — a master-reference figure only, set
+   * once at Create and never silently re-applied to stock on a later Update. Distinct from
+   * currentStock below. */
+  openingBalance?: number | null
+  /** Write-only: the Godown Opening Balance posts its Inventory.StockOpening document to. Required
+   * only when openingBalance is supplied on Create; never echoed back by Get/List. */
+  openingBalanceGodownId?: number | null
+  /** Read-only: current stock on hand for this product, summed across every Godown — deliberately
+   * never confused with openingBalance (purchases/sales/adjustments move this figure; openingBalance
+   * never changes after Create). */
+  currentStock?: number | null
   brand?: string | null
   thicknessMm?: number | null
   colour?: string | null
@@ -324,19 +343,30 @@ export interface SupplierDto {
   canDelete: boolean
 }
 
-/** Sub-Category Master. Mandatory code + name, unique code. */
-export interface SubCategoryDto {
-  subCategoryId: number; code: string; name: string; isActive: boolean
-  /** True while no Category currently references this Sub-Category. */
+/** Category Master — the parent side of Category → Sub-Category. Mandatory code + name, unique code. */
+export interface CategoryDto {
+  categoryId: number; code: string; name: string; isActive: boolean
+  /** True while no Sub-Category and no Product currently references this Category. */
   canDelete: boolean
 }
-/** Category Master. subCategoryId is the real foreign key; subCategoryCode/subCategoryName are
- * joined in for display only — the authoritative name lives on SubCategoryDto, never duplicated
- * here as an independently-typed value. */
-export interface CategoryDto {
-  categoryId: number; code: string; name: string; subCategoryId: number
-  subCategoryCode?: string | null; subCategoryName?: string | null
-  isActive: boolean; canDelete: boolean
+/** Sub-Category Master — the child side of Category → Sub-Category. categoryId is the real foreign
+ * key; categoryCode/categoryName are joined in for display only — the authoritative name lives on
+ * CategoryDto, never duplicated here as an independently-typed value. */
+export interface SubCategoryDto {
+  subCategoryId: number; code: string; name: string; categoryId: number
+  categoryCode?: string | null; categoryName?: string | null
+  isActive: boolean
+  /** True while no Product currently references this Sub-Category. */
+  canDelete: boolean
+}
+
+/** Type Master — deliberately just typeId + name, no code column (unlike Category/SubCategory). A
+ * Type already used by a Product is never physically deletable, so the only lifecycle action is
+ * Activate/Deactivate. */
+export interface TypeDto {
+  typeId: number; name: string; isActive: boolean
+  /** True while no Product currently references this Type. */
+  canDelete: boolean
 }
 
 export interface PurchaseOrderLineDto { productId: number; productCode?: string | null; qty: number; rate: number; value: number }
