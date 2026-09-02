@@ -56,7 +56,7 @@ export const api = createApi({
     'Stock', 'StockOpening', 'StockAdjustment', 'StockTransfer', 'Offcut', 'Supplier', 'PurchaseOrder', 'Grn',
     'PurchaseInvoice', 'EwayBill', 'Quotation', 'SalesOrder', 'CuttingPlan', 'CuttingEntry', 'WorkOrder', 'JobCard',
     'FurnaceBatch', 'Voucher', 'Expense', 'Complaint', 'Employee', 'Attendance', 'CounterInvoice',
-    'Role', 'User', 'Notification', 'Godown', 'Rack', 'RackStock',
+    'Role', 'User', 'Notification', 'Godown', 'Rack', 'RackStock', 'SubCategory', 'Category',
   ],
   endpoints: () => ({}),
 })
