@@ -145,6 +145,30 @@ public class ProductDto
     /// <summary>Read-only, joined from Master.Category -- never trusted from the client.</summary>
     public string? CategoryCode { get; set; }
     public string? CategoryName { get; set; }
+    /// <summary>The database-driven Sub-Category Master link. Must belong to the selected Category --
+    /// enforced server-side, never trusted from the client (see ProductsController).</summary>
+    public int? SubCategoryId { get; set; }
+    /// <summary>Read-only, joined from Master.SubCategory -- never trusted from the client.</summary>
+    public string? SubCategoryCode { get; set; }
+    public string? SubCategoryName { get; set; }
+    /// <summary>The database-driven Type Master link.</summary>
+    public int? TypeId { get; set; }
+    /// <summary>Read-only, joined from Master.Type -- never trusted from the client.</summary>
+    public string? TypeName { get; set; }
+    /// <summary>The quantity this product started with, in StockUnit -- a master-reference figure
+    /// only. Set once, at Create; never silently re-applied to stock on a later Update (see
+    /// ProductsController.Update, which never touches this column). The real stock effect happens
+    /// exactly once, through an Inventory.StockOpening document posted at Create time -- this column
+    /// never itself feeds Inventory.StockBalance a second time.</summary>
+    public decimal? OpeningBalance { get; set; }
+    /// <summary>Write-only: the Godown the Opening Balance's Inventory.StockOpening document posts
+    /// to. Required only when OpeningBalance is supplied on Create; ignored on Update and never
+    /// echoed back by Get/List (the resulting stock lives in Inventory.StockBalance, not here).</summary>
+    public int? OpeningBalanceGodownId { get; set; }
+    /// <summary>Read-only: current stock on hand for this product, summed across every Godown, from
+    /// Inventory.StockBalance -- deliberately never confused with OpeningBalance above (purchases,
+    /// sales and adjustments move this figure; OpeningBalance never changes after Create).</summary>
+    public decimal? CurrentStock { get; set; }
     public string? Brand { get; set; }
     public decimal? ThicknessMm { get; set; }
     public string? Colour { get; set; }

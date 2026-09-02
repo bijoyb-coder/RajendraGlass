@@ -26,6 +26,7 @@ import CompanyProfilePage from './features/masters/CompanyProfilePage'
 import ProductsPage from './features/masters/ProductsPage'
 import CategoriesPage from './features/masters/CategoriesPage'
 import SubCategoriesPage from './features/masters/SubCategoriesPage'
+import TypesPage from './features/masters/TypesPage'
 import CustomersPage from './features/masters/CustomersPage'
 import GodownsPage from './features/masters/GodownsPage'
 import SuppliersPage from './features/purchase/SuppliersPage'
@@ -98,6 +99,7 @@ export default function App() {
             <Route path="/masters/products" element={<ProductsPage />} />
             <Route path="/masters/categories" element={<CategoriesPage />} />
             <Route path="/masters/subcategories" element={<SubCategoriesPage />} />
+            <Route path="/masters/types" element={<TypesPage />} />
             <Route path="/masters/customers" element={<CustomersPage />} />
             <Route path="/masters/godowns" element={<GodownsPage />} />
             <Route path="/masters/suppliers" element={<SuppliersPage />} />
