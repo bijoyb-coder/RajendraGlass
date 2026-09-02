@@ -55,8 +55,10 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
         using var conn = db.CreateConnection();
         var sql = $@"SELECT p.ProductId, p.Code, p.Description, p.Category, p.Brand, p.ThicknessMm, p.Colour, p.HsnCode, p.GstRatePct,
                             p.StockUnit, p.SellingUnit, p.StandardSheetLengthMm, p.StandardSheetWidthMm, p.PurchaseRate, p.SellingRate, p.MinSellingPrice, p.IsActive,
+                            p.CategoryId, c.Code AS CategoryCode, c.Name AS CategoryName,
                             {CanDeleteSql} AS CanDelete
                      FROM Master.Product p
+                     LEFT JOIN Master.Category c ON c.CategoryId = p.CategoryId
                      WHERE (@activeOnly = 0 OR p.IsActive = 1)
                        AND (@search IS NULL OR p.Code LIKE '%' + @search + '%' OR p.Description LIKE '%' + @search + '%')
                      ORDER BY p.Description";
@@ -72,8 +74,11 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
         var product = conn.QueryFirstOrDefault<ProductDto>(
             $@"SELECT p.ProductId, p.Code, p.Description, p.Category, p.Brand, p.ThicknessMm, p.Colour, p.HsnCode, p.GstRatePct,
                      p.StockUnit, p.SellingUnit, p.StandardSheetLengthMm, p.StandardSheetWidthMm, p.PurchaseRate, p.SellingRate, p.MinSellingPrice, p.IsActive,
+                     p.CategoryId, c.Code AS CategoryCode, c.Name AS CategoryName,
                      {CanDeleteSql} AS CanDelete
-              FROM Master.Product p WHERE p.ProductId = @id", new { id });
+              FROM Master.Product p
+              LEFT JOIN Master.Category c ON c.CategoryId = p.CategoryId
+              WHERE p.ProductId = @id", new { id });
         if (product is null) return NotFound();
         if (!CanViewCost) product.PurchaseRate = null;
         return Ok(product);
@@ -95,12 +100,22 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
             return Conflict(new ProblemResponse { Title = "Duplicate code", Status = 409, ErrorCode = "DUPLICATE_CODE", Detail = $"A product with code '{dto.Code}' already exists." });
         }
 
+        // CategoryId is optional (not every product has been assigned one), but when supplied it
+        // must name a real, active Category -- the dropdown only ever offers real ones, but a
+        // direct API call must not be able to smuggle in a dangling reference.
+        if (dto.CategoryId.HasValue)
+        {
+            var category = conn.QueryFirstOrDefault("SELECT Code, Name FROM Master.Category WHERE CategoryId = @id AND IsActive = 1", new { id = dto.CategoryId.Value });
+            if (category is null)
+                return UnprocessableEntity(new ProblemResponse { Title = "Invalid Category", Status = 422, ErrorCode = "CATEGORY_NOT_FOUND", Detail = "The selected category does not exist or is inactive." });
+        }
+
         try
         {
             var id = conn.ExecuteScalar<int>(
-                @"INSERT INTO Master.Product (Code, Description, Category, Brand, ThicknessMm, Colour, HsnCode, GstRatePct, StockUnit, SellingUnit, StandardSheetLengthMm, StandardSheetWidthMm, PurchaseRate, SellingRate, MinSellingPrice, IsActive)
+                @"INSERT INTO Master.Product (Code, Description, Category, CategoryId, Brand, ThicknessMm, Colour, HsnCode, GstRatePct, StockUnit, SellingUnit, StandardSheetLengthMm, StandardSheetWidthMm, PurchaseRate, SellingRate, MinSellingPrice, IsActive)
                   OUTPUT INSERTED.ProductId
-                  VALUES (@Code, @Description, @Category, @Brand, @ThicknessMm, @Colour, @HsnCode, @GstRatePct, @StockUnit, @SellingUnit, @StandardSheetLengthMm, @StandardSheetWidthMm, @PurchaseRate, @SellingRate, @MinSellingPrice, 1)",
+                  VALUES (@Code, @Description, @Category, @CategoryId, @Brand, @ThicknessMm, @Colour, @HsnCode, @GstRatePct, @StockUnit, @SellingUnit, @StandardSheetLengthMm, @StandardSheetWidthMm, @PurchaseRate, @SellingRate, @MinSellingPrice, 1)",
                 dto);
             dto.ProductId = id;
             return CreatedAtAction(nameof(Get), new { id }, dto);
@@ -119,14 +134,22 @@ public class ProductsController(IDbConnectionFactory db) : ControllerBase
             return UnprocessableEntity(new ProblemResponse { Title = "Description required", Status = 422, ErrorCode = "DESCRIPTION_REQUIRED", Detail = "Product description is required." });
 
         using var conn = db.CreateConnection();
+
+        if (dto.CategoryId.HasValue)
+        {
+            var category = conn.QueryFirstOrDefault("SELECT Code, Name FROM Master.Category WHERE CategoryId = @id AND IsActive = 1", new { id = dto.CategoryId.Value });
+            if (category is null)
+                return UnprocessableEntity(new ProblemResponse { Title = "Invalid Category", Status = 422, ErrorCode = "CATEGORY_NOT_FOUND", Detail = "The selected category does not exist or is inactive." });
+        }
+
         try
         {
             var rows = conn.Execute(
-                @"UPDATE Master.Product SET Description=@Description, Category=@Category, Brand=@Brand, ThicknessMm=@ThicknessMm,
+                @"UPDATE Master.Product SET Description=@Description, Category=@Category, CategoryId=@CategoryId, Brand=@Brand, ThicknessMm=@ThicknessMm,
                          Colour=@Colour, HsnCode=@HsnCode, GstRatePct=@GstRatePct, StockUnit=@StockUnit, SellingUnit=@SellingUnit,
                          StandardSheetLengthMm=@StandardSheetLengthMm, StandardSheetWidthMm=@StandardSheetWidthMm,
                          PurchaseRate=@PurchaseRate, SellingRate=@SellingRate, MinSellingPrice=@MinSellingPrice
-                  WHERE ProductId=@id", new { id, dto.Description, dto.Category, dto.Brand, dto.ThicknessMm, dto.Colour, dto.HsnCode, dto.GstRatePct, dto.StockUnit, dto.SellingUnit, dto.StandardSheetLengthMm, dto.StandardSheetWidthMm, dto.PurchaseRate, dto.SellingRate, dto.MinSellingPrice });
+                  WHERE ProductId=@id", new { id, dto.Description, dto.Category, dto.CategoryId, dto.Brand, dto.ThicknessMm, dto.Colour, dto.HsnCode, dto.GstRatePct, dto.StockUnit, dto.SellingUnit, dto.StandardSheetLengthMm, dto.StandardSheetWidthMm, dto.PurchaseRate, dto.SellingRate, dto.MinSellingPrice });
             return rows == 0 ? NotFound() : NoContent();
         }
         catch (Microsoft.Data.SqlClient.SqlException ex)

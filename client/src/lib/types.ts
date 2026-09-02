@@ -22,7 +22,14 @@ export interface ProductDto {
   productId: number
   code: string
   description: string
+  /** Legacy free-text category, predating the Category Master — kept as historical record for any
+   * product not yet assigned a real categoryId. New saves should use categoryId instead. */
   category?: string | null
+  /** The database-driven Category Master link. Nullable — not every product has been assigned one
+   * yet. categoryCode/categoryName are read-only, joined from Master.Category. */
+  categoryId?: number | null
+  categoryCode?: string | null
+  categoryName?: string | null
   brand?: string | null
   thicknessMm?: number | null
   colour?: string | null

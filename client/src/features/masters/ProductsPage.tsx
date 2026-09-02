@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { Plus, X, Layers, Printer, Pencil, ArrowLeftCircle } from 'lucide-react'
-import { useCreateProductMutation, useListProductsQuery, useUpdateProductMutation, useDeleteProductMutation } from './mastersApi'
+import { useCreateProductMutation, useListProductsQuery, useUpdateProductMutation, useDeleteProductMutation, useListCategoriesQuery } from './mastersApi'
+import SearchableSelect from '../../components/SearchableSelect'
 import {
   useDataGrid,
   SortIcon,
@@ -20,7 +21,7 @@ import { alertError } from '../../lib/alerts'
 import type { ProductDto } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
-const emptyForm: Partial<ProductDto> = { code: '', description: '', category: '', brand: '', colour: '', hsnCode: '', gstRatePct: 18, stockUnit: 'Sqm', sellingUnit: 'Sqm' }
+const emptyForm: Partial<ProductDto> = { code: '', description: '', brand: '', colour: '', hsnCode: '', gstRatePct: 18, stockUnit: 'Sqm', sellingUnit: 'Sqm' }
 
 type SortKey = 'code' | 'description' | 'thicknessMm' | 'colour' | 'sellingRate'
 
@@ -33,6 +34,7 @@ export default function ProductsPage() {
   const returningToQuotation = returnState?.returnTo === 'quotation'
 
   const { data, isLoading } = useListProductsQuery()
+  const { data: categories } = useListCategoriesQuery()
   const [createProduct, { isLoading: creating }] = useCreateProductMutation()
   const [updateProduct, { isLoading: updating }] = useUpdateProductMutation()
   const [deleteProduct] = useDeleteProductMutation()
@@ -75,6 +77,8 @@ export default function ProductsPage() {
     matches: (p, term) =>
       !!p.code?.toLowerCase().includes(term) ||
       !!p.description?.toLowerCase().includes(term) ||
+      !!p.categoryCode?.toLowerCase().includes(term) ||
+      !!p.categoryName?.toLowerCase().includes(term) ||
       !!p.category?.toLowerCase().includes(term) ||
       !!p.brand?.toLowerCase().includes(term) ||
       !!p.colour?.toLowerCase().includes(term),
@@ -98,7 +102,7 @@ export default function ProductsPage() {
         { label: 'Min Selling Price', align: 'right' }, { label: 'Status' },
       ],
       rows: allRows.map((p) => [
-        p.code, p.description, p.category || '—', p.brand || '—',
+        p.code, p.description, p.categoryName ?? p.category ?? '—', p.brand || '—',
         p.thicknessMm ?? '—', p.colour || '—', p.hsnCode || '—',
         p.gstRatePct, p.stockUnit, p.sellingUnit,
         p.purchaseRate ?? '—', p.sellingRate ?? '—',
@@ -116,7 +120,9 @@ export default function ProductsPage() {
   function openEdit(p: ProductDto) {
     setEditingId(p.productId)
     setForm({
-      code: p.code, description: p.description, category: p.category ?? '', brand: p.brand ?? '',
+      // category (the legacy free-text field) has no input on this form any more, but is carried
+      // through unedited so saving doesn't null it out — see db/52_product_category_link.sql.
+      code: p.code, description: p.description, category: p.category ?? undefined, categoryId: p.categoryId ?? undefined, brand: p.brand ?? '',
       thicknessMm: p.thicknessMm ?? undefined, colour: p.colour ?? '', hsnCode: p.hsnCode ?? '',
       gstRatePct: p.gstRatePct, stockUnit: p.stockUnit, sellingUnit: p.sellingUnit,
       sellingRate: p.sellingRate ?? undefined, minSellingPrice: p.minSellingPrice ?? undefined,
@@ -177,7 +183,17 @@ export default function ProductsPage() {
           <h2 className="sm:col-span-3 text-sm font-semibold text-slate-700 -mb-2">{editingId ? 'Edit Product' : 'New Product'}</h2>
           <Field label="Code *"><input required disabled={!!editingId} value={form.code} onChange={(e) => set('code', e.target.value)} className={`${inputClass} ${editingId ? 'bg-slate-100 text-slate-500' : ''}`} /></Field>
           <Field label="Description *" wide><input required value={form.description} onChange={(e) => set('description', e.target.value)} className={inputClass} /></Field>
-          <Field label="Category"><input value={form.category ?? ''} onChange={(e) => set('category', e.target.value)} className={inputClass} /></Field>
+          <Field label="Category">
+            {/* Database-driven — options come from the Category Master (CategoriesController.List),
+                never a hard-coded array. Optional: not every product has one yet. */}
+            <SearchableSelect
+              value={form.categoryId ?? ''}
+              onChange={(id) => set('categoryId', id)}
+              options={categories?.items.map((c) => ({ value: c.categoryId, label: `${c.code} - ${c.name}` })) ?? []}
+              placeholder="Search Category…"
+              className={inputClass}
+            />
+          </Field>
           <Field label="Brand"><input value={form.brand ?? ''} onChange={(e) => set('brand', e.target.value)} className={inputClass} /></Field>
           <Field label="Thickness (mm)"><input type="number" step="0.1" value={form.thicknessMm ?? ''} onChange={(e) => set('thicknessMm', Number(e.target.value))} className={inputClass} /></Field>
           <Field label="Colour"><input value={form.colour ?? ''} onChange={(e) => set('colour', e.target.value)} className={inputClass} /></Field>
@@ -214,6 +230,7 @@ export default function ProductsPage() {
                 <SortableTh onClick={() => toggleSort('description')}>
                   Description <SortIcon column="description" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
+                <Th>Category</Th>
                 <SortableTh onClick={() => toggleSort('thicknessMm')}>
                   Thickness <SortIcon column="thicknessMm" sortKey={sortKey} sortDir={sortDir} />
                 </SortableTh>
@@ -228,10 +245,10 @@ export default function ProductsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {isLoading && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
+              {isLoading && <tr><td colSpan={8} className="px-5 py-10 text-center text-slate-400">Loading…</td></tr>}
               {!isLoading && rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-14 text-center text-slate-400">
+                  <td colSpan={8} className="px-5 py-14 text-center text-slate-400">
                     <Layers size={28} className="mx-auto mb-2 text-slate-300" />
                     {search ? 'No products match your search.' : 'No products yet.'}
                   </td>
@@ -241,6 +258,7 @@ export default function ProductsPage() {
                 <tr key={p.productId} className={DATA_GRID_ROW_CLASS}>
                   <td className="px-5 py-3 font-medium text-brand-700">{p.code}</td>
                   <td className="px-5 py-3 text-slate-700">{p.description}</td>
+                  <td className="px-5 py-3 text-slate-500">{p.categoryName ?? p.category ?? '—'}</td>
                   <td className="px-5 py-3 text-slate-500">{p.thicknessMm ? `${p.thicknessMm} mm` : '—'}</td>
                   <td className="px-5 py-3 text-slate-500">{p.colour ?? '—'}</td>
                   <td className="px-5 py-3 text-right font-semibold text-slate-800">{p.sellingRate ? `₹${p.sellingRate.toLocaleString('en-IN')}` : '—'}</td>

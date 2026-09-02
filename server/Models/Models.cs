@@ -135,7 +135,16 @@ public class ProductDto
     public int ProductId { get; set; }
     public string Code { get; set; } = "";
     public string Description { get; set; } = "";
+    /// <summary>Legacy free-text category, predating Master.Category -- kept as historical record
+    /// for any product not yet assigned a real CategoryId (see db/52_product_category_link.sql).
+    /// New saves should use CategoryId instead.</summary>
     public string? Category { get; set; }
+    /// <summary>The database-driven Category Master link. Nullable -- not every product has been
+    /// assigned one yet.</summary>
+    public int? CategoryId { get; set; }
+    /// <summary>Read-only, joined from Master.Category -- never trusted from the client.</summary>
+    public string? CategoryCode { get; set; }
+    public string? CategoryName { get; set; }
     public string? Brand { get; set; }
     public decimal? ThicknessMm { get; set; }
     public string? Colour { get; set; }

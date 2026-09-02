@@ -147,12 +147,14 @@ public class SubCategoriesController(IDbConnectionFactory db) : ControllerBase
 [Authorize]
 public class CategoriesController(IDbConnectionFactory db) : ControllerBase
 {
+    /// <summary>Deletable only while no Product currently references this Category (see
+    /// db/52_product_category_link.sql, Master.Product.CategoryId).</summary>
+    private const string CanDeleteSql =
+        @"CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM Master.Product x WHERE x.CategoryId = c.CategoryId)
+          THEN 1 ELSE 0 END AS BIT)";
     private const string SelectColumns =
-        @"c.CategoryId, c.Code, c.Name, c.SubCategoryId, sc.Code AS SubCategoryCode, sc.Name AS SubCategoryName, c.IsActive,
-          CAST(1 AS BIT) AS CanDelete";
-    // Nothing currently references Master.Category, so a Category is always deletable -- CanDelete
-    // is included anyway (hardcoded true) so the DTO/UI shape stays identical to every other master
-    // and this doesn't need to change if something comes to depend on Category later.
+        $@"c.CategoryId, c.Code, c.Name, c.SubCategoryId, sc.Code AS SubCategoryCode, sc.Name AS SubCategoryName, c.IsActive,
+          {CanDeleteSql} AS CanDelete";
 
     [HttpGet]
     public IActionResult List([FromQuery] string? search)
@@ -260,6 +262,18 @@ public class CategoriesController(IDbConnectionFactory db) : ControllerBase
         {
             var category = conn.QueryFirstOrDefault("SELECT * FROM Master.Category WHERE CategoryId = @id", new { id }, tx);
             if (category is null) { tx.Rollback(); return NotFound(); }
+
+            if (conn.ExecuteScalar<int>("SELECT COUNT(*) FROM Master.Product WHERE CategoryId = @id", new { id }, tx) > 0)
+            {
+                tx.Rollback();
+                return Conflict(new ProblemResponse
+                {
+                    Title = "Category is mapped",
+                    Status = 409,
+                    ErrorCode = "CATEGORY_HAS_PRODUCT",
+                    Detail = "Cannot delete this Category because it is mapped to one or more Products.",
+                });
+            }
 
             conn.Execute("DELETE FROM Master.Category WHERE CategoryId = @id", new { id }, tx);
             AuditLogger.LogDelete(conn, tx, User, HttpContext, "Category", id.ToString(), category);
