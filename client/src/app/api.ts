@@ -1,7 +1,7 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react'
 import type { BaseQueryFn, FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query/react'
 import type { RootState } from './store'
-import { setCredentials, logout } from '../features/auth/authSlice'
+import { refreshAccessToken } from '../lib/authRefresh'
 
 const rawBaseQuery = fetchBaseQuery({
   baseUrl: '/api/v1',
@@ -14,11 +14,9 @@ const rawBaseQuery = fetchBaseQuery({
 })
 
 // Silent token refresh (SDD 8.1): on a 401 from an expired access token, exchange the refresh
-// cookie for a new one and retry the original request once. Concurrent 401s share a single
-// in-flight refresh instead of each firing their own (a stampede would rotate the token N times
-// and strand N-1 of them).
-let refreshPromise: Promise<boolean> | null = null
-
+// cookie for a new one (via the shared lib/authRefresh — SignalR's reconnect loop shares the same
+// in-flight refresh, since the refresh cookie is single-use/rotating and two concurrent refreshes
+// would otherwise race) and retry the original request once.
 const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (args, api, extraOptions) => {
   let result = await rawBaseQuery(args, api, extraOptions)
 
@@ -28,19 +26,8 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
       return result // never try to refresh a login/refresh call itself
     }
 
-    refreshPromise ??= (async () => {
-      const refreshResult = await rawBaseQuery({ url: '/auth/refresh', method: 'POST' }, api, extraOptions)
-      const data = refreshResult.data as { accessToken: string; user: any } | undefined
-      if (refreshResult.error || !data?.accessToken) {
-        api.dispatch(logout())
-        return false
-      }
-      api.dispatch(setCredentials({ accessToken: data.accessToken, user: data.user }))
-      return true
-    })().finally(() => { refreshPromise = null })
-
-    const refreshed = await refreshPromise
-    if (refreshed) {
+    const newToken = await refreshAccessToken()
+    if (newToken) {
       result = await rawBaseQuery(args, api, extraOptions)
     }
   }
