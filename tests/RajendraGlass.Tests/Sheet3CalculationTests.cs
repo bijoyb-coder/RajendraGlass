@@ -132,6 +132,36 @@ public class Sheet3CalculationTests
         Assert.Equal(356m, Math.Round(r.BasicAmount, 0, MidpointRounding.AwayFromZero));
     }
 
+    /// <summary>
+    /// Sheet3 only ever uses a 6" charge step, but the UI also offers 3" (SalesLineGrid's "round"
+    /// selector), and ChargeRoundingInch is a plain step parameter — RoundUpToStep works the same
+    /// way for any step (see the RoundUpToStep_Works cases below). This exercises the full line
+    /// calculation, not just the rounding primitive, at step=3": 8" and 10" round up to the next
+    /// multiple of 3 (9" and 12"), same "round up, then price the rounded size" rule as 6".
+    /// </summary>
+    [Fact]
+    public void InchRow_ThreeInchStep_RoundsToMultipleOfThree()
+    {
+        var r = QuotationCalculator.Calculate(new LineCalcInput
+        {
+            Length = 8m,
+            Width = 10m,
+            DimensionUnit = DimensionUnits.Inch,
+            Qty = 1m,
+            Rate = 100m,
+            RateUnit = RateUnits.PerSqft,
+            ApplyThickness = false,
+            ChargeRoundingInch = 3m,
+            GstPct = 0m,
+        });
+
+        Assert.Equal(9m, r.ChargeLengthInch);
+        Assert.Equal(12m, r.ChargeWidthInch);
+        Assert.Equal(0.75m, r.Area);
+        Assert.Equal("SQFT", r.AreaUnit);
+        Assert.Equal(75m, r.BasicAmount);
+    }
+
     // ---------- Rule C: flat charge lines (VAN 140, CUTTER 140, previous dues) ----------
     [Theory]
     [InlineData(93, 140)]
