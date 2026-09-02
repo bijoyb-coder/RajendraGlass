@@ -145,11 +145,11 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         if (discountTypeProblem is not null) return Invalid("Discount", discountTypeProblem);
 
         // Quotations don't carry GST -- enforced here, not just hidden client-side, so a direct
-        // API call can't smuggle a nonzero rate in. Description is likewise document-level now
-        // (see req.Description), not per line. Discount is document-level too now -- every line's
+        // API call can't smuggle a nonzero rate in. Discount is document-level too -- every line's
         // own DiscountPct is forced to 0 the same way, and the single figure entered against the
         // whole quotation (req.DiscountType/DiscountValue) is what actually reduces the total.
-        foreach (var l in req.Lines) { l.GstPct = 0; l.DiscountPct = 0; l.Description = null; }
+        // Description, unlike GST/Discount, is item-wise -- each line keeps whatever it was sent.
+        foreach (var l in req.Lines) { l.GstPct = 0; l.DiscountPct = 0; }
 
         // Server-side validation: the frontend validates for a fast response, but the server
         // must never accept a line it cannot price correctly.
@@ -248,7 +248,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         if (holesCutoutProblem is not null) return Invalid("Holes / Cutout", holesCutoutProblem);
         var discountTypeProblem = ValidateDiscountShape(req.DiscountType, req.DiscountValue);
         if (discountTypeProblem is not null) return Invalid("Discount", discountTypeProblem);
-        foreach (var l in req.Lines) { l.GstPct = 0; l.DiscountPct = 0; l.Description = null; }
+        foreach (var l in req.Lines) { l.GstPct = 0; l.DiscountPct = 0; }
 
         for (int i = 0; i < req.Lines.Count; i++)
         {
