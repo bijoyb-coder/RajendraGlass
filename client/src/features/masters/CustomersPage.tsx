@@ -1,5 +1,6 @@
-import { useState } from 'react'
-import { Plus, X, Users, Pencil } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { Plus, X, Users, Pencil, ArrowLeftCircle } from 'lucide-react'
 import { useCreateCustomerMutation, useListCustomersQuery, useUpdateCustomerMutation, useDeleteCustomerMutation } from './mastersApi'
 import {
   useDataGrid,
@@ -13,7 +14,7 @@ import {
   ActionTh,
   DeleteRowAction,
 } from '../../components/DataGrid'
-import { alertError } from '../../lib/alerts'
+import { alertError, alertSuccess } from '../../lib/alerts'
 import type { CustomerDto } from '../../lib/types'
 
 const inputClass = 'w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-300 focus:border-brand-400 transition'
@@ -22,6 +23,15 @@ const emptyForm: Partial<CustomerDto> = { code: '', name: '', customerType: 'Ret
 type SortKey = 'code' | 'name' | 'customerType' | 'creditLimit'
 
 export default function CustomersPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  // Only set when we arrived here via Quotation Entry's "New Customer" button -- a direct visit
+  // from the main menu never carries this, so it behaves exactly as it always has (see
+  // handleSubmit below, and ProductsPage.tsx's identical "+ Add New Product…" round trip, which
+  // this mirrors field-for-field).
+  const returnState = location.state as { returnTo?: string; draft?: unknown } | null
+  const returningToQuotation = returnState?.returnTo === 'quotation'
+
   const { data, isLoading } = useListCustomersQuery()
   const [createCustomer, { isLoading: creating }] = useCreateCustomerMutation()
   const [updateCustomer, { isLoading: updating }] = useUpdateCustomerMutation()
@@ -30,6 +40,12 @@ export default function CustomersPage() {
   const [editingId, setEditingId] = useState<number | null>(null)
   const [form, setForm] = useState<Partial<CustomerDto>>(emptyForm)
   const saving = creating || updating
+
+  // Jump straight to the New Customer form -- the whole point of this trip.
+  useEffect(() => {
+    if (returningToQuotation) openNew()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const {
     rows,
@@ -96,11 +112,24 @@ export default function CustomersPage() {
     try {
       if (editingId) {
         await updateCustomer({ id: editingId, body: form }).unwrap()
+        void alertSuccess('Customer updated successfully.')
+        setForm(emptyForm)
+        closeForm()
       } else {
-        await createCustomer(form).unwrap()
+        const result = await createCustomer(form).unwrap()
+        setForm(emptyForm)
+        closeForm()
+        // Only the "New Customer" trip from Quotation Entry carries this -- a customer created
+        // from the main menu just stays here, as it always has.
+        if (returningToQuotation) {
+          await alertSuccess('Customer has been Saved successfully, Navigating Previous page')
+          navigate('/sales/quotations', {
+            state: { restoreDraft: returnState!.draft, newCustomerId: result.customerId },
+          })
+        } else {
+          void alertSuccess('Customer Saved successfully.')
+        }
       }
-      setForm(emptyForm)
-      closeForm()
     } catch (err: any) {
       void alertError(err?.data?.title ?? 'Could not save', err?.data?.detail ?? 'The customer could not be saved.')
     }
@@ -108,6 +137,12 @@ export default function CustomersPage() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {returningToQuotation && (
+        <div className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-800">
+          <ArrowLeftCircle size={16} />
+          Save this customer to return to your quotation with it selected.
+        </div>
+      )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-brand-900">Customers</h1>

@@ -42,8 +42,6 @@ import {
   DeleteRowAction,
 } from "../../components/DataGrid";
 import type {
-  CustomerType,
-  NewCustomerRequest,
   CreateQuotationLine,
   QuotationDto,
   QuotationDiscountType,
@@ -59,16 +57,6 @@ function money(n: number) {
     maximumFractionDigits: 2,
   }).format(n);
 }
-
-const emptyNewCustomer: NewCustomerRequest = {
-  name: "",
-  customerType: "Retail",
-  gstin: "",
-  mobile: "",
-  billingAddress: "",
-  stateCode: "19",
-  stateName: "West Bengal",
-};
 
 const statusStyles: Record<string, string> = {
   Sent: "bg-blue-50 text-blue-700 ring-blue-200",
@@ -89,8 +77,6 @@ type SortKey = "quotationNo" | "quotationDate" | "customerName" | "totalValue" |
 interface QuotationDraft {
   editingId: number | null;
   customerId: number | "";
-  newCustomerMode: boolean;
-  newCustomer: NewCustomerRequest;
   lines: SalesLine[];
   holeRate: number;
   bHoleRate: number;
@@ -117,9 +103,6 @@ export default function QuotationsPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [customerId, setCustomerId] = useState<number | "">("");
-  const [newCustomerMode, setNewCustomerMode] = useState(false);
-  const [newCustomer, setNewCustomer] =
-    useState<NewCustomerRequest>(emptyNewCustomer);
   const [lines, setLines] = useState<SalesLine[]>([emptyLine()]);
   // One rate per hole/cutout type, entered once for the whole document -- not per line. Applied
   // to the sum of every line's own item-wise Hole/B-Hole/Cutout/B-Cutout quantity.
@@ -140,17 +123,18 @@ export default function QuotationsPage() {
   // has actually refetched and includes it.
   const [pendingNewProduct, setPendingNewProduct] = useState<{ lineKey: string; productId: number } | null>(null);
 
-  // Coming back from Product Master after "+ Add New Product…": restore the form exactly as it
-  // was, then queue the new product to be dropped into the line that asked for it (see the effect
-  // below, which waits for the product list to actually include it).
+  // Coming back from Product Master after "+ Add New Product…", or from Customer Entry after
+  // "New Customer": restore the form exactly as it was, then either queue the new product to be
+  // dropped into the line that asked for it (see the effect below, which waits for the product
+  // list to actually include it) or select the newly created customer directly -- Customer's own
+  // list is refetched by the time we land back here (CustomersPage's create already resolved
+  // before navigating), so no equivalent wait-for-cache step is needed for it.
   useEffect(() => {
-    const state = location.state as { restoreDraft?: QuotationDraft; targetLineKey?: string; newProductId?: number } | null;
+    const state = location.state as { restoreDraft?: QuotationDraft; targetLineKey?: string; newProductId?: number; newCustomerId?: number } | null;
     if (!state?.restoreDraft) return;
     const draft = state.restoreDraft;
     setEditingId(draft.editingId);
-    setCustomerId(draft.customerId);
-    setNewCustomerMode(draft.newCustomerMode);
-    setNewCustomer(draft.newCustomer);
+    setCustomerId(state.newCustomerId ?? draft.customerId);
     setLines(draft.lines);
     setHoleRate(draft.holeRate);
     setBHoleRate(draft.bHoleRate);
@@ -192,10 +176,22 @@ export default function QuotationsPage() {
    * as it always has -- no redirect back here. */
   function handleAddNewProduct(lineKey: string) {
     const draft: QuotationDraft = {
-      editingId, customerId, newCustomerMode, newCustomer, lines,
+      editingId, customerId, lines,
       holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue,
     };
     navigate("/masters/products", { state: { returnTo: "quotation", targetLineKey: lineKey, draft } });
+  }
+
+  /** "New Customer": stash everything typed so far and navigate to the real Customer Entry page
+   * (CustomersPage.tsx) -- same round trip as handleAddNewProduct above, just without a per-line
+   * target since a quotation only ever has one customer. Saving there returns here (see the
+   * restore effect above) with the same data restored and the new customer selected. */
+  function handleAddNewCustomer() {
+    const draft: QuotationDraft = {
+      editingId, customerId, lines,
+      holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue,
+    };
+    navigate("/masters/customers", { state: { returnTo: "quotation", draft } });
   }
 
   // ---------- Data grid: search + sort over the fetched list ----------
@@ -237,8 +233,6 @@ export default function QuotationsPage() {
     setEditingId(null);
     setLines([emptyLine()]);
     setCustomerId("");
-    setNewCustomerMode(false);
-    setNewCustomer(emptyNewCustomer);
     setHoleRate(0);
     setBHoleRate(0);
     setCutoutRate(0);
@@ -257,7 +251,6 @@ export default function QuotationsPage() {
     const full = await fetchQuotation(q.quotationId).unwrap();
     setEditingId(full.quotationId);
     setCustomerId(full.customerId);
-    setNewCustomerMode(false);
     setLines(full.lines.length ? full.lines.map(fromSavedLine) : [emptyLine()]);
     setHoleRate(full.holeRate);
     setBHoleRate(full.bHoleRate);
@@ -271,16 +264,7 @@ export default function QuotationsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!editingId && newCustomerMode) {
-      if (!newCustomer.name.trim()) {
-        alertError("Customer name required", "Enter the new customer name.");
-        return;
-      }
-      if (!newCustomer.mobile?.trim()) {
-        alertError("Phone number required", "A phone number is mandatory for every customer.");
-        return;
-      }
-    } else if (!customerId) {
+    if (!customerId) {
       alertError("Customer required", "Select a customer, or add a new one.");
       return;
     }
@@ -318,8 +302,7 @@ export default function QuotationsPage() {
         resetForm();
       } else {
         const result = await createQuotation({
-          customerId: newCustomerMode ? 0 : Number(customerId),
-          newCustomer: newCustomerMode ? newCustomer : undefined,
+          customerId: Number(customerId),
           lines: payload,
           holeRate,
           bHoleRate,
@@ -411,133 +394,38 @@ export default function QuotationsPage() {
           </div>
 
           {/* ---------- Customer ---------- */}
+          {/* A brand-new customer is created on the real Customer Entry page, not inline here --
+              see handleAddNewCustomer, mirroring the existing "+ Add New Product…" round trip.
+              Saving there returns here with this exact form restored and the new customer
+              selected (see the restore effect above). */}
           <div className="flex flex-wrap items-end gap-3">
-            {!newCustomerMode ? (
-              <div className="w-full max-w-sm">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  Customer *
-                </label>
-                <select
-                  value={customerId}
-                  onChange={(e) =>
-                    setCustomerId(e.target.value ? Number(e.target.value) : "")
-                  }
-                  className={inputClass}
-                >
-                  <option value="">Select customer…</option>
-                  {customers?.items.map((c) => (
-                    <option key={c.customerId} value={c.customerId}>
-                      {c.name} ({c.customerType ?? "Retail"})
-                    </option>
-                  ))}
-                </select>
-              </div>
-            ) : (
-              <div className="text-sm font-semibold text-brand-800">
-                New customer details
-              </div>
-            )}
-            {/* Inline new-customer creation only applies to a brand-new quotation. */}
-            {!editingId && (
-              <button
-                type="button"
-                onClick={() => setNewCustomerMode((v) => !v)}
-                className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 pb-2.5"
+            <div className="w-full max-w-sm">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">
+                Customer *
+              </label>
+              <select
+                value={customerId}
+                onChange={(e) =>
+                  setCustomerId(e.target.value ? Number(e.target.value) : "")
+                }
+                className={inputClass}
               >
-                {newCustomerMode ? (
-                  <>
-                    <X size={15} /> Use existing customer
-                  </>
-                ) : (
-                  <>
-                    <UserPlus size={15} /> New customer
-                  </>
-                )}
-              </button>
-            )}
-          </div>
-
-          {newCustomerMode && (
-            <div className="grid sm:grid-cols-3 gap-4 rounded-lg bg-slate-50 border border-slate-200 p-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  Name *
-                </label>
-                <input
-                  required
-                  value={newCustomer.name}
-                  onChange={(e) =>
-                    setNewCustomer((c) => ({ ...c, name: e.target.value }))
-                  }
-                  className={inputClass}
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  Customer Type *
-                </label>
-                <select
-                  value={newCustomer.customerType}
-                  onChange={(e) =>
-                    setNewCustomer((c) => ({
-                      ...c,
-                      customerType: e.target.value as CustomerType,
-                    }))
-                  }
-                  className={inputClass}
-                >
-                  <option value="Retail">Retail</option>
-                  <option value="Wholesale">Wholesale</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  Phone Number *
-                </label>
-                <input
-                  required
-                  value={newCustomer.mobile ?? ""}
-                  onChange={(e) =>
-                    setNewCustomer((c) => ({ ...c, mobile: e.target.value }))
-                  }
-                  className={inputClass}
-                  placeholder="10-digit mobile number"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  GSTIN
-                </label>
-                <input
-                  maxLength={15}
-                  value={newCustomer.gstin ?? ""}
-                  onChange={(e) =>
-                    setNewCustomer((c) => ({ ...c, gstin: e.target.value }))
-                  }
-                  className={inputClass}
-                />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-semibold text-slate-600 mb-1">
-                  Billing Address
-                </label>
-                <input
-                  value={newCustomer.billingAddress ?? ""}
-                  onChange={(e) =>
-                    setNewCustomer((c) => ({
-                      ...c,
-                      billingAddress: e.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                />
-              </div>
-              <p className="sm:col-span-3 text-xs text-slate-500">
-                This customer is saved to Master Data when the quotation is
-                saved.
-              </p>
+                <option value="">Select customer…</option>
+                {customers?.items.map((c) => (
+                  <option key={c.customerId} value={c.customerId}>
+                    {c.name} ({c.customerType ?? "Retail"})
+                  </option>
+                ))}
+              </select>
             </div>
-          )}
+            <button
+              type="button"
+              onClick={handleAddNewCustomer}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 pb-2.5"
+            >
+              <UserPlus size={15} /> New Customer
+            </button>
+          </div>
 
           {/* ---------- Lines ---------- */}
           {/* Shared with the Sales Order screen so the two can never drift apart. Description is
