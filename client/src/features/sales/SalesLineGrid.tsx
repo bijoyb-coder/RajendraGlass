@@ -435,7 +435,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
         <table className="w-full text-sm min-w-[1500px]">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400 border-b border-slate-100">
-              <th className="py-2 pr-2 font-medium min-w-[190px]">Product / Description</th>
+              <th className="py-2 pr-2 font-medium min-w-[240px]">Product / Description</th>
               <th className="py-2 pr-2 font-medium w-20">Thick. (mm)</th>
               <th className="py-2 pr-2 font-medium w-24">Length</th>
               <th className="py-2 pr-2 font-medium w-24">Width</th>
@@ -496,11 +496,12 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                       {onAddNewProduct && <option value="__new__">+ Add New Product…</option>}
                     </select>
                     {showItemDescription && (
-                      <input
+                      <textarea
+                        rows={3}
                         placeholder="Description / remarks"
                         value={l.description}
                         onChange={(e) => updateLine(l.key, { description: e.target.value })}
-                        className={`${cellInput} mt-1.5`}
+                        className={`${cellInput} mt-1.5 resize-y`}
                       />
                     )}
                     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
