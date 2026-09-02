@@ -89,6 +89,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                      l.Length, l.Width, l.DimensionUnit, l.Qty, l.Rate, l.RateUnit,
                      l.ApplyThickness, l.ChargeRoundingInch, l.GstPct, l.DiscountPct,
                      l.ManualArea, l.ManualBasicAmount,
+                     l.ManualChargeHeightInch, l.ManualChargeWidthInch, l.IsChargeSizeManualOverride,
                      l.ThicknessMm, l.HeightInch AS LengthInch, l.WidthInch,
                      l.ChargeHeightInch AS ChargeLengthInch, l.ChargeWidthInch,
                      l.CalculatedArea, l.Area, l.AreaUnit, l.EffectiveRate,
@@ -157,7 +158,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             var l = req.Lines[i];
             var problem = SalesLinePricing.Validate(l.Length, l.Width, l.DimensionUnit, l.Qty, l.Rate,
                 l.RateUnit, l.GstPct, l.DiscountPct, l.ChargeRoundingInch, l.ThicknessMm,
-                l.ManualArea, l.ManualBasicAmount);
+                l.ManualArea, l.ManualBasicAmount, l.ManualChargeHeightInch, l.ManualChargeWidthInch);
             if (problem is not null) return Invalid($"Line {i + 1}", problem);
         }
 
@@ -254,7 +255,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             var l = req.Lines[i];
             var problem = SalesLinePricing.Validate(l.Length, l.Width, l.DimensionUnit, l.Qty, l.Rate,
                 l.RateUnit, l.GstPct, l.DiscountPct, l.ChargeRoundingInch, l.ThicknessMm,
-                l.ManualArea, l.ManualBasicAmount);
+                l.ManualArea, l.ManualBasicAmount, l.ManualChargeHeightInch, l.ManualChargeWidthInch);
             if (problem is not null) return Invalid($"Line {i + 1}", problem);
         }
 
@@ -387,6 +388,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             ThicknessMm = thickness,
             ApplyThickness = l.ApplyThickness,
             ChargeRoundingInch = l.ChargeRoundingInch,
+            ManualChargeHeightInch = l.ManualChargeHeightInch,
+            ManualChargeWidthInch = l.ManualChargeWidthInch,
             GstPct = l.GstPct,
             DiscountPct = l.DiscountPct,
             ManualArea = l.ManualArea,
@@ -397,7 +400,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         {
             entered = new { l.Length, l.Width, unit = calc.DimensionUnit, l.Qty, l.Rate, rateUnit = calc.RateUnit },
             rules = new { l.ApplyThickness, l.ChargeRoundingInch, thicknessMm = thickness, l.GstPct, l.DiscountPct },
-            overrides = new { l.ManualArea, l.ManualBasicAmount },
+            overrides = new { l.ManualArea, l.ManualBasicAmount, l.ManualChargeHeightInch, l.ManualChargeWidthInch },
             computed = new { calc.CalculatedArea, calc.CalculatedBasicAmount, calc.EffectiveRate },
             calc.CalculationMethod,
         });
@@ -408,6 +411,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                  Length, Width, DimensionUnit, RateUnit, ApplyThickness, ChargeRoundingInch,
                  UnitOfMeasure, ChargeType,
                  HeightInch, WidthInch, ChargeHeightInch, ChargeWidthInch,
+                 ManualChargeHeightInch, ManualChargeWidthInch, IsChargeSizeManualOverride,
                  HeightFt, WidthFt, AreaSqft,
                  CalculatedArea, Area, AreaUnit, EffectiveRate,
                  ThicknessMm, CalculatedBasicAmount, ChargeableAmount,
@@ -420,6 +424,7 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                  @Length, @Width, @DimensionUnit, @RateUnit, @ApplyThickness, @ChargeRoundingInch,
                  @DimensionUnit, @ChargeRoundingInch,
                  @LengthInch, @WidthInch, @ChargeLengthInch, @ChargeWidthInch,
+                 @ManualChargeHeightInch, @ManualChargeWidthInch, @IsChargeSizeManualOverride,
                  @HeightFt, @WidthFt, @AreaSqft,
                  @CalculatedArea, @Area, @AreaUnit, @EffectiveRate,
                  @ThicknessMm, @CalculatedBasicAmount, @BasicAmount,
@@ -444,6 +449,9 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                 calc.WidthInch,
                 calc.ChargeLengthInch,
                 calc.ChargeWidthInch,
+                l.ManualChargeHeightInch,
+                l.ManualChargeWidthInch,
+                calc.IsChargeSizeManualOverride,
                 // Legacy columns, kept populated so older reads keep working.
                 HeightFt = calc.ChargeLengthInch / 12m,
                 WidthFt = calc.ChargeWidthInch / 12m,
@@ -534,6 +542,7 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
                      l.ApplyThickness, l.ChargeRoundingInch, l.GstPct, l.DiscountPct, l.ThicknessMm,
                      l.ManualArea, l.ManualBasicAmount,
                      l.LengthInch, l.WidthInch, l.ChargeLengthInch, l.ChargeWidthInch,
+                     l.ManualChargeHeightInch, l.ManualChargeWidthInch, l.IsChargeSizeManualOverride,
                      l.CalculatedArea, l.Area, l.AreaUnit, l.EffectiveRate,
                      l.CalculatedBasicAmount, l.BasicAmount, l.DiscountAmount, l.TaxableAmount,
                      l.GstAmount, l.Amount, l.Value,
@@ -601,7 +610,7 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
             var l = req.Lines[i];
             var problem = SalesLinePricing.Validate(l.Length, l.Width, l.DimensionUnit, l.Qty, l.Rate,
                 l.RateUnit, l.GstPct, l.DiscountPct, l.ChargeRoundingInch, l.ThicknessMm,
-                l.ManualArea, l.ManualBasicAmount);
+                l.ManualArea, l.ManualBasicAmount, l.ManualChargeHeightInch, l.ManualChargeWidthInch);
             if (problem is not null)
                 return UnprocessableEntity(new ProblemResponse
                 {
@@ -638,7 +647,8 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
                 decimal masterThickness = l.ProductId.HasValue && thicknessByProduct.TryGetValue(l.ProductId.Value, out var t) ? t : 0m;
                 var calc = SalesLinePricing.Price(l.Length, l.Width, l.DimensionUnit, l.Qty, l.Rate,
                     l.RateUnit, l.ApplyThickness, l.ChargeRoundingInch, l.GstPct, l.DiscountPct,
-                    l.ThicknessMm, masterThickness, l.ManualArea, l.ManualBasicAmount);
+                    l.ThicknessMm, masterThickness, l.ManualArea, l.ManualBasicAmount,
+                    l.ManualChargeHeightInch, l.ManualChargeWidthInch);
 
                 basicTotal += calc.BasicAmount;
                 gstTotal += calc.GstAmount;
@@ -649,6 +659,7 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
                         (SalesOrderId, ProductId, Description, Qty, Rate, Value,
                          Length, Width, DimensionUnit, RateUnit, ApplyThickness, ChargeRoundingInch, ThicknessMm,
                          LengthInch, WidthInch, ChargeLengthInch, ChargeWidthInch,
+                         ManualChargeHeightInch, ManualChargeWidthInch, IsChargeSizeManualOverride,
                          CalculatedArea, Area, AreaUnit, EffectiveRate,
                          CalculatedBasicAmount, BasicAmount, DiscountPct, DiscountAmount, TaxableAmount,
                          GstPct, GstAmount, Amount,
@@ -658,6 +669,7 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
                         (@id, @ProductId, @Description, @Qty, @Rate, @BasicAmount,
                          @Length, @Width, @DimensionUnit, @RateUnit, @ApplyThickness, @ChargeRoundingInch, @ThicknessMm,
                          @LengthInch, @WidthInch, @ChargeLengthInch, @ChargeWidthInch,
+                         @ManualChargeHeightInch, @ManualChargeWidthInch, @IsChargeSizeManualOverride,
                          @CalculatedArea, @Area, @AreaUnit, @EffectiveRate,
                          @CalculatedBasicAmount, @BasicAmount, @DiscountPct, @DiscountAmount, @TaxableAmount,
                          @GstPct, @GstAmount, @FinalAmount,
@@ -681,6 +693,9 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
                         calc.WidthInch,
                         calc.ChargeLengthInch,
                         calc.ChargeWidthInch,
+                        l.ManualChargeHeightInch,
+                        l.ManualChargeWidthInch,
+                        calc.IsChargeSizeManualOverride,
                         calc.CalculatedArea,
                         calc.Area,
                         calc.AreaUnit,
@@ -698,7 +713,7 @@ public class SalesOrdersController(IDbConnectionFactory db) : ControllerBase
                         calc.IsAreaManualOverride,
                         calc.IsAmountManualOverride,
                         calc.CalculationMethod,
-                        metadata = SalesLinePricing.Metadata(calc, calc.ThicknessMm, l.ManualArea, l.ManualBasicAmount, l.DiscountPct),
+                        metadata = SalesLinePricing.Metadata(calc, calc.ThicknessMm, l.ManualArea, l.ManualBasicAmount, l.DiscountPct, l.ManualChargeHeightInch, l.ManualChargeWidthInch),
                     }, tx);
             }
 

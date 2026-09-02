@@ -629,6 +629,10 @@ public class QuotationLineDto
     public bool ApplyThickness { get; set; } = true;
     /// <summary>Round each dimension up to the next multiple of this many inches; 0 = off.</summary>
     public decimal ChargeRoundingInch { get; set; }
+    /// <summary>Set to bill this dimension at a height/width other than the auto-rounded one --
+    /// wins over ChargeRoundingInch for that dimension outright. Either or both may be set.</summary>
+    public decimal? ManualChargeHeightInch { get; set; }
+    public decimal? ManualChargeWidthInch { get; set; }
     public decimal GstPct { get; set; } = QuotationCalculator.DefaultGstPct;
     public decimal DiscountPct { get; set; }
     /// <summary>
@@ -665,6 +669,7 @@ public class QuotationLineDto
     public string CalculationMethod { get; set; } = "";
     public bool IsAreaManualOverride { get; set; }
     public bool IsAmountManualOverride { get; set; }
+    public bool IsChargeSizeManualOverride { get; set; }
 }
 
 public class QuotationDto
@@ -794,6 +799,9 @@ public class SalesOrderLineDto
     public string RateUnit { get; set; } = RateUnits.PerSqm;
     public bool ApplyThickness { get; set; } = true;
     public decimal ChargeRoundingInch { get; set; }
+    /// <summary>See QuotationLineDto.ManualChargeHeightInch/ManualChargeWidthInch.</summary>
+    public decimal? ManualChargeHeightInch { get; set; }
+    public decimal? ManualChargeWidthInch { get; set; }
     public decimal GstPct { get; set; } = QuotationCalculator.DefaultGstPct;
     public decimal DiscountPct { get; set; }
     public decimal? ThicknessMm { get; set; }
@@ -820,6 +828,7 @@ public class SalesOrderLineDto
     public string CalculationMethod { get; set; } = "";
     public bool IsAreaManualOverride { get; set; }
     public bool IsAmountManualOverride { get; set; }
+    public bool IsChargeSizeManualOverride { get; set; }
 }
 
 public class SalesOrderDto

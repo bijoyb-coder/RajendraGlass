@@ -162,6 +162,65 @@ public class Sheet3CalculationTests
         Assert.Equal(75m, r.BasicAmount);
     }
 
+    /// <summary>
+    /// ManualChargeHeightInch/ManualChargeWidthInch let the operator type an exact chargeable
+    /// size directly, replacing the rounded figure for that one dimension outright -- pinning
+    /// only the height here, so the width still comes from rounding the real 10" up to 12".
+    /// Amount = Rate x (Charge Height x Charge Width) / 144 x Qty, exactly the same formula an
+    /// auto-rounded line uses -- only the source of the chargeable size changes.
+    /// </summary>
+    [Fact]
+    public void ManualChargeHeight_OverridesOnlyThatDimension()
+    {
+        var r = QuotationCalculator.Calculate(new LineCalcInput
+        {
+            Length = 8m,
+            Width = 10m,
+            DimensionUnit = DimensionUnits.Inch,
+            Qty = 1m,
+            Rate = 100m,
+            RateUnit = RateUnits.PerSqft,
+            ApplyThickness = false,
+            ChargeRoundingInch = 6m,
+            ManualChargeHeightInch = 20m,
+            GstPct = 0m,
+        });
+
+        Assert.Equal(20m, r.ChargeLengthInch);      // pinned directly
+        Assert.Equal(12m, r.ChargeWidthInch);       // still rounded: 10" -> next multiple of 6
+        Assert.Equal(Math.Round(20m * 12m / 144m, 6), r.Area);
+        Assert.Equal(Math.Round(100m * 20m * 12m / 144m, 2), r.BasicAmount);
+        Assert.True(r.IsChargeSizeManualOverride);
+    }
+
+    /// <summary>Pinning both dimensions makes the measured Length/Width moot entirely -- the
+    /// exact "Total = Rate x (Chargeable Height x Chargeable Width)" case, with Qty still
+    /// multiplying as it does for every other area-priced line.</summary>
+    [Fact]
+    public void ManualChargeHeightAndWidth_BothPinned_IgnoresMeasuredSize()
+    {
+        var r = QuotationCalculator.Calculate(new LineCalcInput
+        {
+            Length = 0m,
+            Width = 0m,
+            DimensionUnit = DimensionUnits.Inch,
+            Qty = 2m,
+            Rate = 100m,
+            RateUnit = RateUnits.PerSqft,
+            ApplyThickness = false,
+            ChargeRoundingInch = 0m,
+            ManualChargeHeightInch = 12m,
+            ManualChargeWidthInch = 12m,
+            GstPct = 0m,
+        });
+
+        Assert.Equal(12m, r.ChargeLengthInch);
+        Assert.Equal(12m, r.ChargeWidthInch);
+        Assert.Equal(1m, r.Area);                    // 12x12 / 144 = 1 sqft
+        Assert.Equal(200m, r.BasicAmount);            // Rate(100) x Area(1) x Qty(2)
+        Assert.True(r.IsChargeSizeManualOverride);
+    }
+
     // ---------- Rule C: flat charge lines (VAN 140, CUTTER 140, previous dues) ----------
     [Theory]
     [InlineData(93, 140)]

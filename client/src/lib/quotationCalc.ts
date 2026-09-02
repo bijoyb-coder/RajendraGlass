@@ -77,6 +77,10 @@ export interface LineCalcInput {
   thicknessMm: number;
   applyThickness: boolean;
   chargeRoundingInch: number;
+  /** Operator-supplied chargeable height/width, replacing the auto-rounded figure for that
+   * dimension outright. Either or both may be set. */
+  manualChargeHeightInch?: number | null;
+  manualChargeWidthInch?: number | null;
   gstPct: number;
   discountPct: number;
   manualArea?: number | null;
@@ -101,6 +105,7 @@ export interface LineCalcResult {
   calculationMethod: CalculationMethod;
   isAreaManualOverride: boolean;
   isAmountManualOverride: boolean;
+  isChargeSizeManualOverride: boolean;
 }
 
 export function calculateLine(i: LineCalcInput): LineCalcResult {
@@ -108,8 +113,14 @@ export function calculateLine(i: LineCalcInput): LineCalcResult {
   const lengthInch = i.length * perInch;
   const widthInch = i.width * perInch;
 
-  const chargeLengthInch = roundUpToStep(lengthInch, i.chargeRoundingInch);
-  const chargeWidthInch = roundUpToStep(widthInch, i.chargeRoundingInch);
+  const chargeHeightOverridden = i.manualChargeHeightInch != null;
+  const chargeWidthOverridden = i.manualChargeWidthInch != null;
+  const chargeLengthInch = chargeHeightOverridden
+    ? (i.manualChargeHeightInch as number)
+    : roundUpToStep(lengthInch, i.chargeRoundingInch);
+  const chargeWidthInch = chargeWidthOverridden
+    ? (i.manualChargeWidthInch as number)
+    : roundUpToStep(widthInch, i.chargeRoundingInch);
 
   let calculatedArea: number;
   let areaUnit: LineCalcResult["areaUnit"];
@@ -178,5 +189,6 @@ export function calculateLine(i: LineCalcInput): LineCalcResult {
     calculationMethod,
     isAreaManualOverride: areaOverridden,
     isAmountManualOverride: amountOverridden,
+    isChargeSizeManualOverride: chargeHeightOverridden || chargeWidthOverridden,
   };
 }

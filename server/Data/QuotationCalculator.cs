@@ -79,6 +79,12 @@ public class LineCalcInput
     /// </summary>
     public decimal ChargeRoundingInch { get; set; }
 
+    /// <summary>Operator-supplied chargeable height/width, replacing the auto-rounded figure for
+    /// that dimension outright -- the other dimension (if not also overridden) still comes from
+    /// rounding as usual. Either or both may be set.</summary>
+    public decimal? ManualChargeHeightInch { get; set; }
+    public decimal? ManualChargeWidthInch { get; set; }
+
     public decimal GstPct { get; set; } = 18m;
     public decimal DiscountPct { get; set; }
     public decimal DiscountAmount { get; set; }
@@ -117,6 +123,9 @@ public class LineCalcResult
     public string CalculationMethod { get; set; } = "";
     public bool IsAreaManualOverride { get; set; }
     public bool IsAmountManualOverride { get; set; }
+    /// <summary>True when either ChargeLengthInch or ChargeWidthInch came from
+    /// ManualChargeHeightInch/ManualChargeWidthInch rather than rounding.</summary>
+    public bool IsChargeSizeManualOverride { get; set; }
 }
 
 /// <summary>
@@ -169,8 +178,12 @@ public static class QuotationCalculator
 
         // Chargeable size: round up to the next multiple of the charge step (Sheet3 inch rows
         // use 6"). Zero leaves the measured size untouched, which is what the metre rows do.
-        decimal chargeLengthInch = RoundUpToStep(lengthInch, input.ChargeRoundingInch);
-        decimal chargeWidthInch = RoundUpToStep(widthInch, input.ChargeRoundingInch);
+        // Either dimension may instead be pinned directly by the operator (ManualChargeHeightInch/
+        // ManualChargeWidthInch), overriding the rounded figure for that dimension outright.
+        bool chargeHeightOverridden = input.ManualChargeHeightInch.HasValue;
+        bool chargeWidthOverridden = input.ManualChargeWidthInch.HasValue;
+        decimal chargeLengthInch = chargeHeightOverridden ? input.ManualChargeHeightInch!.Value : RoundUpToStep(lengthInch, input.ChargeRoundingInch);
+        decimal chargeWidthInch = chargeWidthOverridden ? input.ManualChargeWidthInch!.Value : RoundUpToStep(widthInch, input.ChargeRoundingInch);
 
         // Area is computed in whatever unit the rate is quoted against, at full precision —
         // nothing is rounded until the very end.
@@ -253,6 +266,7 @@ public static class QuotationCalculator
             CalculationMethod = method,
             IsAreaManualOverride = areaOverridden,
             IsAmountManualOverride = amountOverridden,
+            IsChargeSizeManualOverride = chargeHeightOverridden || chargeWidthOverridden,
         };
     }
 }

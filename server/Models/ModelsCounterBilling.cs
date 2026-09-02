@@ -22,6 +22,10 @@ public class CreateCounterInvoiceLineRequest
     public string RateUnit { get; set; } = RateUnits.PerSqm;
     public bool ApplyThickness { get; set; } = true;
     public decimal ChargeRoundingInch { get; set; }
+    /// <summary>Set to bill this dimension at a height/width other than the auto-rounded one --
+    /// see QuotationLineDto.ManualChargeHeightInch/ManualChargeWidthInch.</summary>
+    public decimal? ManualChargeHeightInch { get; set; }
+    public decimal? ManualChargeWidthInch { get; set; }
     public decimal GstPct { get; set; } = QuotationCalculator.DefaultGstPct;
     public decimal DiscountPct { get; set; }
     /// <summary>Defaults from the product master when omitted; editable per line.</summary>
