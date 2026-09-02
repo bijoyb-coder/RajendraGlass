@@ -317,6 +317,21 @@ export interface SupplierDto {
   canDelete: boolean
 }
 
+/** Sub-Category Master. Mandatory code + name, unique code. */
+export interface SubCategoryDto {
+  subCategoryId: number; code: string; name: string; isActive: boolean
+  /** True while no Category currently references this Sub-Category. */
+  canDelete: boolean
+}
+/** Category Master. subCategoryId is the real foreign key; subCategoryCode/subCategoryName are
+ * joined in for display only — the authoritative name lives on SubCategoryDto, never duplicated
+ * here as an independently-typed value. */
+export interface CategoryDto {
+  categoryId: number; code: string; name: string; subCategoryId: number
+  subCategoryCode?: string | null; subCategoryName?: string | null
+  isActive: boolean; canDelete: boolean
+}
+
 export interface PurchaseOrderLineDto { productId: number; productCode?: string | null; qty: number; rate: number; value: number }
 /** A GRN raised against this order — a PO can have more than one (partial receipts). */
 export interface PoGrnRefDto { grnId: number; grnNo?: string | null; grnDate: string; status: string }

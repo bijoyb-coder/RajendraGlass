@@ -1,5 +1,5 @@
 import { api } from '../../app/api'
-import type { CompanyDto, CustomerDto, ProductDto, TransporterDto, VehicleDto } from '../../lib/types'
+import type { CompanyDto, CustomerDto, ProductDto, TransporterDto, VehicleDto, SubCategoryDto, CategoryDto } from '../../lib/types'
 
 export const mastersApi = api.injectEndpoints({
   endpoints: (builder) => ({
@@ -53,6 +53,45 @@ export const mastersApi = api.injectEndpoints({
     listVehicles: builder.query<{ items: VehicleDto[] }, number>({
       query: (transporterId) => `/transporters/${transporterId}/vehicles`,
     }),
+
+    // Sub-Category Master. Also reused by the Category page's Sub-Category dropdown — one list,
+    // no separate "/active" endpoint (see server/Controllers/CategoryController.cs).
+    listSubCategories: builder.query<{ items: SubCategoryDto[] }, { search?: string } | void>({
+      query: (args) => ({ url: '/subcategories', params: args ?? {} }),
+      providesTags: ['SubCategory'],
+    }),
+    createSubCategory: builder.mutation<SubCategoryDto, Partial<SubCategoryDto>>({
+      query: (body) => ({ url: '/subcategories', method: 'POST', body }),
+      invalidatesTags: ['SubCategory'],
+    }),
+    updateSubCategory: builder.mutation<void, { id: number; body: Partial<SubCategoryDto> }>({
+      query: ({ id, body }) => ({ url: `/subcategories/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['SubCategory'],
+    }),
+    deleteSubCategory: builder.mutation<void, number>({
+      query: (id) => ({ url: `/subcategories/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['SubCategory'],
+    }),
+
+    // Category Master.
+    listCategories: builder.query<{ items: CategoryDto[] }, { search?: string } | void>({
+      query: (args) => ({ url: '/categories', params: args ?? {} }),
+      providesTags: ['Category'],
+    }),
+    createCategory: builder.mutation<CategoryDto, Partial<CategoryDto>>({
+      query: (body) => ({ url: '/categories', method: 'POST', body }),
+      // A new Category never changes what any Sub-Category dropdown option looks like, but it
+      // does change canDelete on its own Sub-Category's row in the SubCategories grid.
+      invalidatesTags: ['Category', 'SubCategory'],
+    }),
+    updateCategory: builder.mutation<void, { id: number; body: Partial<CategoryDto> }>({
+      query: ({ id, body }) => ({ url: `/categories/${id}`, method: 'PUT', body }),
+      invalidatesTags: ['Category', 'SubCategory'],
+    }),
+    deleteCategory: builder.mutation<void, number>({
+      query: (id) => ({ url: `/categories/${id}`, method: 'DELETE' }),
+      invalidatesTags: ['Category', 'SubCategory'],
+    }),
   }),
 })
 
@@ -69,4 +108,12 @@ export const {
   useDeleteCustomerMutation,
   useListTransportersQuery,
   useListVehiclesQuery,
+  useListSubCategoriesQuery,
+  useCreateSubCategoryMutation,
+  useUpdateSubCategoryMutation,
+  useDeleteSubCategoryMutation,
+  useListCategoriesQuery,
+  useCreateCategoryMutation,
+  useUpdateCategoryMutation,
+  useDeleteCategoryMutation,
 } = mastersApi
