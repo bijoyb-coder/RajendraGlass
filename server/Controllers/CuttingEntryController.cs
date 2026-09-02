@@ -280,8 +280,10 @@ public class CuttingEntryController(IDbConnectionFactory db) : ControllerBase
 
     /// <summary>Cancel, not a hard delete -- Cutting Entry, like every other stock-affecting
     /// document in this app, treats a posted stock movement as immutable; correcting one means
-    /// cancelling it (reversing the deduction) and entering a fresh one. Refuses with 409 if any of
-    /// the stock it deducted has since moved on elsewhere.</summary>
+    /// cancelling it (reversing the deduction) and entering a fresh one. Reversing a Cutting
+    /// deduction always adds stock back, which can never itself be numerically insufficient (see
+    /// CuttingStockConsumption.Reverse), so this never actually returns 409 today -- the branch is
+    /// kept so a future stock-sufficiency rule here doesn't need a new response shape.</summary>
     [RequirePermission("CuttingEntry.Delete")]
     [HttpDelete("{id:int}")]
     public IActionResult Cancel(int id)

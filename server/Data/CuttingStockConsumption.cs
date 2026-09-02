@@ -59,27 +59,18 @@ public static class CuttingStockConsumption
     /// <summary>Reverses everything <see cref="Deduct"/> posted for one Cutting Entry -- reads back
     /// this document's own StockMovement rows (authoritative, never recomputed from the cutting
     /// lines) rather than trusting the caller, same pattern as
-    /// PurchaseController.ReverseStockMovements. Returns a human-readable reason if any of it has
-    /// already moved on elsewhere (caller turns that into a 409), or null on success.</summary>
+    /// PurchaseController.ReverseStockMovements -- but note the direction is opposite: a Purchase
+    /// movement is a positive addition, so *reversing* it subtracts, and needs enough currently on
+    /// hand to remove (that check is a real constraint there). A Cutting movement is already
+    /// negative (Deduct subtracts), so reversing it *adds back* -- which can never be numerically
+    /// insufficient, no matter how negative the balance has gone (Deduct itself never blocks on
+    /// stock sufficiency; see its own doc comment). There is deliberately no "cannot reverse" check
+    /// here -- always returns null.</summary>
     public static string? Reverse(System.Data.IDbConnection conn, System.Data.IDbTransaction tx, string docType, int docId)
     {
         var movements = conn.Query<(int ProductId, int GodownId, decimal Qty)>(
             "SELECT ProductId, GodownId, Qty FROM Inventory.StockMovement WHERE DocType = @docType AND DocId = @docId AND MovementType = 'Cutting'",
             new { docType, docId }, tx).ToList();
-
-        foreach (var m in movements)
-        {
-            var qtyOnHand = conn.ExecuteScalar<decimal?>(
-                "SELECT QtyOnHand FROM Inventory.StockBalance WHERE ProductId = @ProductId AND GodownId = @GodownId",
-                new { m.ProductId, m.GodownId }, tx) ?? 0m;
-            // m.Qty was posted negative by Deduct (it's a "sold out" movement); reversing needs at
-            // least that much still sitting in StockBalance.
-            if (qtyOnHand < -m.Qty)
-            {
-                var product = conn.QueryFirstOrDefault<string>("SELECT Code FROM Master.Product WHERE ProductId = @ProductId", new { m.ProductId }, tx);
-                return $"{product ?? $"Product {m.ProductId}"}: only {qtyOnHand} of the {-m.Qty} cut by this entry is still on hand — the rest has already moved on elsewhere.";
-            }
-        }
 
         foreach (var m in movements)
             conn.Execute("UPDATE Inventory.StockBalance SET QtyOnHand = QtyOnHand - @Qty WHERE ProductId = @ProductId AND GodownId = @GodownId",
