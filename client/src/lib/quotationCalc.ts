@@ -85,6 +85,12 @@ export interface LineCalcInput {
   discountPct: number;
   manualArea?: number | null;
   manualBasicAmount?: number | null;
+  /** Flat per-item charges (Quotation Entry redesign) -- added straight into basicAmount, on top
+   * of whatever the glass itself costs. Default 0, so a line that never sets them behaves exactly
+   * as before -- see server/Data/QuotationCalculator.cs's identical mirror. */
+  hardwareAmount?: number;
+  transportAmount?: number;
+  otherChargesAmount?: number;
 }
 
 export interface LineCalcResult {
@@ -97,6 +103,7 @@ export interface LineCalcResult {
   areaUnit: "SQFT" | "SQM" | "PIECE";
   effectiveRate: number;
   calculatedBasicAmount: number;
+  glassAmount: number;
   basicAmount: number;
   discountAmount: number;
   taxableAmount: number;
@@ -143,10 +150,12 @@ export function calculateLine(i: LineCalcInput): LineCalcResult {
   // Sheet3's meter convention folds thickness into the rate (its hidden H column).
   const effectiveRate = i.applyThickness ? i.rate * i.thicknessMm : i.rate;
 
-  const calculatedBasicAmount =
+  const glassAmount =
     i.rateUnit === "PER_PIECE"
       ? i.qty * effectiveRate
       : area * i.qty * effectiveRate;
+  const flatCharges = (i.hardwareAmount ?? 0) + (i.transportAmount ?? 0) + (i.otherChargesAmount ?? 0);
+  const calculatedBasicAmount = glassAmount + flatCharges;
 
   const amountOverridden = i.manualBasicAmount != null;
   const basicAmount = amountOverridden
@@ -181,6 +190,7 @@ export function calculateLine(i: LineCalcInput): LineCalcResult {
     areaUnit,
     effectiveRate,
     calculatedBasicAmount,
+    glassAmount,
     basicAmount,
     discountAmount,
     taxableAmount,

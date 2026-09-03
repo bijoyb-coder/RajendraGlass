@@ -106,6 +106,19 @@ export interface SalesLine {
   bHoleQty: number;
   cutoutQty: number;
   bCutoutQty: number;
+  /** Flat per-item charges (Quotation Entry redesign's "Other Charges" panel) -- added straight
+   * into this line's own basic amount. Default 0, so Sales Order (which never sets them) behaves
+   * exactly as before. */
+  hardwareAmount: number;
+  transportAmount: number;
+  otherChargesAmount: number;
+  /** Free-text "Selection" field on the Cutting tab -- purely descriptive, no calculation role. */
+  selection: string;
+  /** UI-only: which of the redesigned Quotation Entry item-form's two tabs (Cutting/Toughened)
+   * this item was entered under -- so Edit reopens the same tab. Never sent to the server (not
+   * derivable from the saved fields alone: both tabs can use the same rate basis) and never used
+   * by Sales Order's own grid, which doesn't have tabs. */
+  itemType: "CUTTING" | "TOUGHENED";
   /** UI-only search aid narrowing the Product dropdown to Category/Sub-Category/Type -- never
    * sent to the server (not in toCreateLine) and never restored from a saved line (not in
    * fromSavedLine, which only ever carries productId). Each is independent (Type is not itself
@@ -139,6 +152,11 @@ export const emptyLine = (preset: PresetKey = "SHEET_SQM"): SalesLine => ({
   bHoleQty: 0,
   cutoutQty: 0,
   bCutoutQty: 0,
+  hardwareAmount: 0,
+  transportAmount: 0,
+  otherChargesAmount: 0,
+  selection: "",
+  itemType: "TOUGHENED",
   categoryFilter: "",
   subCategoryFilter: "",
   typeFilter: "",
@@ -178,6 +196,9 @@ export function calcLine(l: SalesLine, showGst = true, showItemDiscount = true) 
     discountPct: showItemDiscount ? l.discountPct : 0,
     manualArea: l.manualArea,
     manualBasicAmount: l.manualBasicAmount,
+    hardwareAmount: l.hardwareAmount,
+    transportAmount: l.transportAmount,
+    otherChargesAmount: l.otherChargesAmount,
   });
 }
 
@@ -216,6 +237,10 @@ interface SavedLineLike {
   bHoleQty?: number | null
   cutoutQty?: number | null
   bCutoutQty?: number | null
+  hardwareAmount?: number | null
+  transportAmount?: number | null
+  otherChargesAmount?: number | null
+  selection?: string | null
 }
 
 /** Reconstructs an editable line from what the server returned — used to open a saved
@@ -246,6 +271,13 @@ export function fromSavedLine(l: SavedLineLike): SalesLine {
     bHoleQty: l.bHoleQty ?? 0,
     cutoutQty: l.cutoutQty ?? 0,
     bCutoutQty: l.bCutoutQty ?? 0,
+    hardwareAmount: l.hardwareAmount ?? 0,
+    transportAmount: l.transportAmount ?? 0,
+    otherChargesAmount: l.otherChargesAmount ?? 0,
+    selection: l.selection ?? "",
+    // Can't be recovered from a saved line (both tabs can share the same rate basis) -- default
+    // to Toughened, the fuller tab; harmless either way since it's purely which tab Edit reopens.
+    itemType: (l.hardwareAmount || l.transportAmount || l.otherChargesAmount || l.holeQty || l.bHoleQty || l.cutoutQty || l.bCutoutQty) ? "TOUGHENED" : "CUTTING",
     // Search-aid only -- a saved line never carried these, so they start blank (unfiltered);
     // the already-selected Product still shows correctly regardless.
     categoryFilter: "",
@@ -277,6 +309,10 @@ export function toCreateLine(l: SalesLine): CreateQuotationLine {
     bHoleQty: l.bHoleQty,
     cutoutQty: l.cutoutQty,
     bCutoutQty: l.bCutoutQty,
+    hardwareAmount: l.hardwareAmount,
+    transportAmount: l.transportAmount,
+    otherChargesAmount: l.otherChargesAmount,
+    selection: l.selection || null,
   };
 }
 

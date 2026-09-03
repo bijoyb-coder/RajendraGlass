@@ -93,6 +93,14 @@ public class LineCalcInput
     public decimal? ManualArea { get; set; }
     /// <summary>Operator-supplied basic amount, replacing everything above it.</summary>
     public decimal? ManualBasicAmount { get; set; }
+
+    /// <summary>Flat per-item charges from the Quotation Entry redesign's "Other Charges" panel --
+    /// added straight into this line's own basic amount, on top of whatever the glass itself
+    /// costs (area x rate). Always 0 for every other document (Sales Order, ...), which never
+    /// populates these. See db/55_quotation_entry_redesign.sql for why these exist.</summary>
+    public decimal HardwareAmount { get; set; }
+    public decimal TransportAmount { get; set; }
+    public decimal OtherChargesAmount { get; set; }
 }
 
 /// <summary>Full breakdown — every intermediate value is returned so a mismatch can be traced.</summary>
@@ -114,6 +122,10 @@ public class LineCalcResult
     public string RateUnit { get; set; } = "";
     public decimal EffectiveRate { get; set; }
     public decimal CalculatedBasicAmount { get; set; }
+    public decimal GlassAmount { get; set; }
+    public decimal HardwareAmount { get; set; }
+    public decimal TransportAmount { get; set; }
+    public decimal OtherChargesAmount { get; set; }
     public decimal BasicAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TaxableAmount { get; set; }
@@ -213,9 +225,14 @@ public static class QuotationCalculator
         // Sheet3's metre convention folds thickness into the rate (its hidden H column).
         decimal effectiveRate = input.ApplyThickness ? input.Rate * input.ThicknessMm : input.Rate;
 
-        decimal calculatedBasic = rateUnit == RateUnits.PerPiece
+        decimal glassAmount = rateUnit == RateUnits.PerPiece
             ? input.Qty * effectiveRate
             : area * input.Qty * effectiveRate;
+        // Hardware/Transport/Other Charges (Quotation Entry redesign) are flat, additive, and
+        // never affected by a manual area override -- only ManualBasicAmount (which "replaces
+        // everything above it", per its own doc comment) supersedes them too.
+        decimal flatCharges = input.HardwareAmount + input.TransportAmount + input.OtherChargesAmount;
+        decimal calculatedBasic = glassAmount + flatCharges;
 
         bool amountOverridden = input.ManualBasicAmount.HasValue;
         decimal basic = amountOverridden ? input.ManualBasicAmount!.Value : calculatedBasic;
@@ -257,6 +274,10 @@ public static class QuotationCalculator
             RateUnit = rateUnit,
             EffectiveRate = Math.Round(effectiveRate, 6),
             CalculatedBasicAmount = Math.Round(calculatedBasic, 2),
+            GlassAmount = Math.Round(glassAmount, 2),
+            HardwareAmount = Math.Round(input.HardwareAmount, 2),
+            TransportAmount = Math.Round(input.TransportAmount, 2),
+            OtherChargesAmount = Math.Round(input.OtherChargesAmount, 2),
             BasicAmount = Math.Round(basic, 2),
             DiscountAmount = Math.Round(discount, 2),
             TaxableAmount = Math.Round(taxable, 2),

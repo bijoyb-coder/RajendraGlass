@@ -22,13 +22,9 @@ import {
   useListCustomersQuery,
   useListProductsQuery,
 } from "../masters/mastersApi";
-import SalesLineGrid, {
-  emptyLine,
-  isComplete,
-  toCreateLine,
-  fromSavedLine,
-} from "./SalesLineGrid";
+import { calcLine, isComplete, toCreateLine, fromSavedLine } from "./SalesLineGrid";
 import type { SalesLine } from "./SalesLineGrid";
+import QuotationItemEntry from "./QuotationItemEntry";
 import { alertError, confirmAction } from "../../lib/alerts";
 import {
   useDataGrid,
@@ -73,11 +69,16 @@ function isEditable(status: string) {
 type SortKey = "quotationNo" | "quotationDate" | "customerName" | "totalValue" | "status";
 
 /** Everything needed to put the in-progress form back exactly as it was, carried across the
- * navigation to Product Master and back via router state (see handleAddNewProduct). */
+ * navigation to Product Master / Customer Entry and back (see handleAddNewProduct/Customer). */
 interface QuotationDraft {
   editingId: number | null;
   customerId: number | "";
   lines: SalesLine[];
+  /** The item still sitting in the "Add Item" entry form (not yet added to `lines`) when the
+   * operator left for "+ Add New Product…" -- restored into QuotationItemEntry via its
+   * initialItem prop so nothing typed is lost. */
+  pendingItem?: SalesLine;
+  pendingEditingKey?: string | null;
   holeRate: number;
   bHoleRate: number;
   cutoutRate: number;
@@ -85,6 +86,10 @@ interface QuotationDraft {
   roundOffEnabled: boolean;
   discountType: QuotationDiscountType;
   discountValue: number;
+  termsConditions: string;
+  notes: string;
+  otherChargesAmount: number;
+  taxPct: number;
 }
 
 export default function QuotationsPage() {
@@ -102,8 +107,11 @@ export default function QuotationsPage() {
 
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  /** The saved number/date of the quotation being edited, so panel 1 can show the real ones
+   * instead of the "auto-generated on save" placeholders a new quotation gets. */
+  const [editingHeader, setEditingHeader] = useState<{ quotationNo: string; quotationDate: string } | null>(null);
   const [customerId, setCustomerId] = useState<number | "">("");
-  const [lines, setLines] = useState<SalesLine[]>([emptyLine()]);
+  const [lines, setLines] = useState<SalesLine[]>([]);
   // One rate per hole/cutout type, entered once for the whole document -- not per line. Applied
   // to the sum of every line's own item-wise Hole/B-Hole/Cutout/B-Cutout quantity.
   const [holeRate, setHoleRate] = useState(0);
@@ -113,24 +121,36 @@ export default function QuotationsPage() {
   // Document-level "round to the nearest rupee" toggle -- not per line. Defaults on, matching
   // the auto-rounding this page always did before this became a visible choice.
   const [roundOffEnabled, setRoundOffEnabled] = useState(true);
-  // Document-level discount -- not per line (every line's own discountPct is forced to 0, see
-  // SalesLineGrid's discount prop). Applied to the whole quotation's basic amount right before
-  // Round Off/Total.
+  // Document-level discount -- not per line (every line's own discountPct is forced to 0).
+  // Applied to the whole quotation's basic amount right before Other Charges/Tax/Round Off/Total.
   const [discountType, setDiscountType] = useState<QuotationDiscountType>("Percent");
   const [discountValue, setDiscountValue] = useState(0);
-  // Set right after restoring a draft that came back from "+ Add New Product…" -- names the line
-  // waiting to receive the product once useListProductsQuery's cache (invalidated by the create)
-  // has actually refetched and includes it.
-  const [pendingNewProduct, setPendingNewProduct] = useState<{ lineKey: string; productId: number } | null>(null);
+  // Flat document-level charge, added after Discount, before Tax -- distinct from each item's
+  // own Hardware/Transport/Other Charges (see QuotationItemEntry).
+  const [otherChargesAmount, setOtherChargesAmount] = useState(0);
+  // Quotation-specific document-level tax -- deliberately separate from GST, which Quotations
+  // still never carry (every line's own gstPct is forced to 0 on save, exactly as before).
+  const [taxPct, setTaxPct] = useState(0);
+  const [termsConditions, setTermsConditions] = useState("");
+  const [notes, setNotes] = useState("");
+
+  // Restored from a draft when returning from "+ Add New Product…" -- seeds QuotationItemEntry's
+  // own in-progress item via its initialItem/initialEditingKey props (see the restore effect
+  // below). Cleared once consumed so a later remount of the form starts blank again.
+  const [restoredItem, setRestoredItem] = useState<SalesLine | undefined>(undefined);
+  const [restoredEditingKey, setRestoredEditingKey] = useState<string | null>(null);
+  // Names a product created via "+ Add New Product…" that hasn't shown up in `products` yet --
+  // handed to QuotationItemEntry, which drops it into the in-progress item once the cache catches
+  // up (see its own pendingProductId prop).
+  const [pendingProductId, setPendingProductId] = useState<number | null>(null);
 
   // Coming back from Product Master after "+ Add New Product…", or from Customer Entry after
-  // "New Customer": restore the form exactly as it was, then either queue the new product to be
-  // dropped into the line that asked for it (see the effect below, which waits for the product
-  // list to actually include it) or select the newly created customer directly -- Customer's own
-  // list is refetched by the time we land back here (CustomersPage's create already resolved
-  // before navigating), so no equivalent wait-for-cache step is needed for it.
+  // "New Customer": restore the form exactly as it was. Customer's own list is refetched by the
+  // time we land back here (CustomersPage's create already resolved before navigating), so no
+  // wait-for-cache step is needed for it -- only the product needs one, since QuotationItemEntry
+  // itself owns that effect now (see pendingProductId above).
   useEffect(() => {
-    const state = location.state as { restoreDraft?: QuotationDraft; targetLineKey?: string; newProductId?: number; newCustomerId?: number } | null;
+    const state = location.state as { restoreDraft?: QuotationDraft; newProductId?: number; newCustomerId?: number } | null;
     if (!state?.restoreDraft) return;
     const draft = state.restoreDraft;
     setEditingId(draft.editingId);
@@ -143,53 +163,42 @@ export default function QuotationsPage() {
     setRoundOffEnabled(draft.roundOffEnabled);
     setDiscountType(draft.discountType);
     setDiscountValue(draft.discountValue);
+    setTermsConditions(draft.termsConditions);
+    setNotes(draft.notes);
+    setOtherChargesAmount(draft.otherChargesAmount);
+    setTaxPct(draft.taxPct);
+    setRestoredItem(draft.pendingItem);
+    setRestoredEditingKey(draft.pendingEditingKey ?? null);
+    if (state.newProductId) setPendingProductId(state.newProductId);
     setShowForm(true);
-    if (state.targetLineKey && state.newProductId) {
-      setPendingNewProduct({ lineKey: state.targetLineKey, productId: state.newProductId });
-    }
     // Consume the navigation state so refreshing or navigating back doesn't replay this restore.
     navigate(location.pathname, { replace: true, state: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Once the newly created product actually shows up in the product list (its cache is
-  // invalidated by the create, but the refetch is async), select it into the waiting line the
-  // same way picking it from the dropdown would -- rate and thickness prefilled from the master.
-  useEffect(() => {
-    if (!pendingNewProduct || !products) return;
-    const product = products.items.find((p) => p.productId === pendingNewProduct.productId);
-    if (!product) return;
-    setLines((prev) =>
-      prev.map((l) =>
-        l.key === pendingNewProduct.lineKey
-          ? { ...l, productId: product.productId, rate: product.sellingRate ?? 0, thicknessMm: product.thicknessMm ?? 0 }
-          : l,
-      ),
-    );
-    setPendingNewProduct(null);
-  }, [products, pendingNewProduct]);
-
-  /** "+ Add New Product…" picked in a line's product dropdown: stash everything typed so far and
-   * navigate to Product Master. Saving a product there returns here (see the effect above) with
-   * the same data restored and the new product selected into this exact line. Navigating to
-   * Product Master any other way (the main menu) never carries this state, so it behaves exactly
-   * as it always has -- no redirect back here. */
-  function handleAddNewProduct(lineKey: string) {
+  /** "+ Add New Product…" picked in the item entry form: stash everything (including the item
+   * still being typed) and navigate to Product Master. Saving a product there returns here (see
+   * the restore effect above) with the same data restored and the new product selected into the
+   * same in-progress item. Navigating to Product Master any other way (the main menu) never
+   * carries this state, so it behaves exactly as it always has -- no redirect back here. */
+  function handleAddNewProduct(currentItem: SalesLine) {
     const draft: QuotationDraft = {
-      editingId, customerId, lines,
+      editingId, customerId, lines, pendingItem: currentItem,
       holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue,
+      termsConditions, notes, otherChargesAmount, taxPct,
     };
-    navigate("/masters/products", { state: { returnTo: "quotation", targetLineKey: lineKey, draft } });
+    navigate("/masters/products", { state: { returnTo: "quotation", draft } });
   }
 
   /** "New Customer": stash everything typed so far and navigate to the real Customer Entry page
-   * (CustomersPage.tsx) -- same round trip as handleAddNewProduct above, just without a per-line
+   * (CustomersPage.tsx) -- same round trip as handleAddNewProduct above, just without a per-item
    * target since a quotation only ever has one customer. Saving there returns here (see the
    * restore effect above) with the same data restored and the new customer selected. */
   function handleAddNewCustomer() {
     const draft: QuotationDraft = {
       editingId, customerId, lines,
       holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue,
+      termsConditions, notes, otherChargesAmount, taxPct,
     };
     navigate("/masters/customers", { state: { returnTo: "quotation", draft } });
   }
@@ -231,7 +240,8 @@ export default function QuotationsPage() {
 
   function resetForm() {
     setEditingId(null);
-    setLines([emptyLine()]);
+    setEditingHeader(null);
+    setLines([]);
     setCustomerId("");
     setHoleRate(0);
     setBHoleRate(0);
@@ -240,6 +250,13 @@ export default function QuotationsPage() {
     setRoundOffEnabled(true);
     setDiscountType("Percent");
     setDiscountValue(0);
+    setOtherChargesAmount(0);
+    setTaxPct(0);
+    setTermsConditions("");
+    setNotes("");
+    setRestoredItem(undefined);
+    setRestoredEditingKey(null);
+    setPendingProductId(null);
   }
 
   function openNewForm() {
@@ -250,8 +267,9 @@ export default function QuotationsPage() {
   async function openEditForm(q: QuotationDto) {
     const full = await fetchQuotation(q.quotationId).unwrap();
     setEditingId(full.quotationId);
+    setEditingHeader({ quotationNo: full.quotationNo ?? "", quotationDate: full.quotationDate ?? new Date().toISOString() });
     setCustomerId(full.customerId);
-    setLines(full.lines.length ? full.lines.map(fromSavedLine) : [emptyLine()]);
+    setLines(full.lines.map(fromSavedLine));
     setHoleRate(full.holeRate);
     setBHoleRate(full.bHoleRate);
     setCutoutRate(full.cutoutRate);
@@ -259,8 +277,31 @@ export default function QuotationsPage() {
     setRoundOffEnabled(full.roundOffEnabled);
     setDiscountType(full.discountType);
     setDiscountValue(full.discountValue);
+    setTermsConditions(full.termsConditions ?? "");
+    setNotes(full.notes ?? "");
+    setOtherChargesAmount(full.otherChargesAmount ?? 0);
+    setTaxPct(full.taxPct ?? 0);
+    setRestoredItem(undefined);
+    setRestoredEditingKey(null);
+    setPendingProductId(null);
     setShowForm(true);
   }
+
+  // ---------- Live summary (mirrors what the server will compute on save) ----------
+  const validLines = lines.filter(isComplete);
+  const linesTotal = validLines.reduce((s, l) => s + calcLine(l, false, true).basicAmount, 0);
+  const totalHoleQty = lines.reduce((s, l) => s + (l.holeQty || 0), 0);
+  const totalBHoleQty = lines.reduce((s, l) => s + (l.bHoleQty || 0), 0);
+  const totalCutoutQty = lines.reduce((s, l) => s + (l.cutoutQty || 0), 0);
+  const totalBCutoutQty = lines.reduce((s, l) => s + (l.bCutoutQty || 0), 0);
+  const holesCutoutAmount = totalHoleQty * holeRate + totalBHoleQty * bHoleRate + totalCutoutQty * cutoutRate + totalBCutoutQty * bCutoutRate;
+  const subtotal = linesTotal + holesCutoutAmount;
+  const discountAmount = discountType === "Percent" ? (subtotal * discountValue) / 100 : discountValue;
+  const afterDiscount = Math.max(0, subtotal - discountAmount);
+  const afterOtherCharges = afterDiscount + otherChargesAmount;
+  const taxAmount = (afterOtherCharges * taxPct) / 100;
+  const grandTotalRaw = afterOtherCharges + taxAmount;
+  const grandTotal = roundOffEnabled ? Math.round(grandTotalRaw) : Math.round(grandTotalRaw * 100) / 100;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -269,11 +310,10 @@ export default function QuotationsPage() {
       return;
     }
 
-    const valid = lines.filter(isComplete);
-    if (valid.length === 0) {
+    if (validLines.length === 0) {
       alertError(
-        "No priceable lines",
-        "Add at least one complete line — a size with quantity and rate, or an amount entered directly.",
+        "No priceable items",
+        "Please add at least one item to the quotation.",
       );
       return;
     }
@@ -284,6 +324,14 @@ export default function QuotationsPage() {
       );
       return;
     }
+    if (taxPct < 0 || taxPct > 100) {
+      alertError("Invalid tax", "Tax % must be between 0 and 100.");
+      return;
+    }
+    if (otherChargesAmount < 0) {
+      alertError("Invalid charge", "Other Charges cannot be negative.");
+      return;
+    }
 
     // Stock is not checked here — a quotation is allowed to save even when it's short on stock
     // (the live per-row badge on each line is still shown, purely advisory).
@@ -292,11 +340,14 @@ export default function QuotationsPage() {
       // Quotations don't carry GST, and discount is document-level now, not per line -- every
       // line is sent with gstPct/discountPct forced to 0 regardless of whatever value it happens
       // to hold (e.g. a legacy quotation loaded for edit).
-      const payload: CreateQuotationLine[] = valid.map(toCreateLine).map((l) => ({ ...l, gstPct: 0, discountPct: 0 }));
+      const payload: CreateQuotationLine[] = validLines.map(toCreateLine).map((l) => ({ ...l, gstPct: 0, discountPct: 0 }));
       if (editingId) {
         await updateQuotation({
           id: editingId,
-          body: { customerId: Number(customerId), lines: payload, holeRate, bHoleRate, cutoutRate, bCutoutRate, roundOffEnabled, discountType, discountValue },
+          body: {
+            customerId: Number(customerId), lines: payload, holeRate, bHoleRate, cutoutRate, bCutoutRate,
+            roundOffEnabled, discountType, discountValue, termsConditions, notes, otherChargesAmount, taxPct,
+          },
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -311,6 +362,10 @@ export default function QuotationsPage() {
           roundOffEnabled,
           discountType,
           discountValue,
+          termsConditions,
+          notes,
+          otherChargesAmount,
+          taxPct,
         }).unwrap();
         setShowForm(false);
         resetForm();
@@ -380,99 +435,143 @@ export default function QuotationsPage() {
       </div>
 
       {showForm && (
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4 animate-fade-in"
-        >
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-brand-800">
-              {editingId ? `Edit Quotation` : "New Quotation"}
-            </h2>
-            {loadingForEdit && (
-              <span className="text-xs text-slate-400">Loading…</span>
-            )}
-          </div>
-
-          {/* ---------- Customer ---------- */}
-          {/* A brand-new customer is created on the real Customer Entry page, not inline here --
-              see handleAddNewCustomer, mirroring the existing "+ Add New Product…" round trip.
-              Saving there returns here with this exact form restored and the new customer
-              selected (see the restore effect above). */}
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="w-full max-w-sm">
-              <label className="block text-xs font-semibold text-slate-600 mb-1">
-                Customer *
-              </label>
-              <select
-                value={customerId}
-                onChange={(e) =>
-                  setCustomerId(e.target.value ? Number(e.target.value) : "")
-                }
-                className={inputClass}
-              >
-                <option value="">Select customer…</option>
-                {customers?.items.map((c) => (
-                  <option key={c.customerId} value={c.customerId}>
-                    {c.name} ({c.customerType ?? "Retail"})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={handleAddNewCustomer}
-              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 pb-2.5"
-            >
-              <UserPlus size={15} /> New Customer
-            </button>
-          </div>
-
-          {/* ---------- Lines ---------- */}
-          {/* Shared with the Sales Order screen so the two can never drift apart. Description is
-              item-wise here (the grid's default) -- entered per line, not once for the whole
-              document. */}
-          <SalesLineGrid
-            lines={lines}
-            products={products}
-            onChange={setLines}
-            showGst={false}
-            onAddNewProduct={handleAddNewProduct}
-            roundOff={{ enabled: roundOffEnabled, onChange: setRoundOffEnabled }}
-            discount={{
-              type: discountType,
-              value: discountValue,
-              onChange: (patch) => {
-                if (patch.type !== undefined) setDiscountType(patch.type);
-                if (patch.value !== undefined) setDiscountValue(patch.value);
-              },
-            }}
-            holesCutout={{
-              holeRate,
-              bHoleRate,
-              cutoutRate,
-              bCutoutRate,
-              onChange: (patch) => {
-                if (patch.holeRate !== undefined) setHoleRate(patch.holeRate);
-                if (patch.bHoleRate !== undefined) setBHoleRate(patch.bHoleRate);
-                if (patch.cutoutRate !== undefined) setCutoutRate(patch.cutoutRate);
-                if (patch.bCutoutRate !== undefined) setBCutoutRate(patch.bCutoutRate);
-              },
-            }}
-          />
-
-          <div className="flex justify-end gap-2">
-            {editingId && (
+        <form onSubmit={handleSubmit} className="space-y-5 animate-fade-in">
+          {/* ---------- 1. Customer & Quotation Details ---------- */}
+          <Section title="1. Customer & Quotation Details" extra={loadingForEdit ? "Loading…" : undefined}>
+            <div className="flex flex-wrap items-end gap-3 mb-4">
+              <div className="w-full max-w-sm">
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Customer *</label>
+                <select value={customerId} onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : "")} className={inputClass}>
+                  <option value="">Select customer…</option>
+                  {customers?.items.map((c) => (
+                    <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerType ?? "Retail"})</option>
+                  ))}
+                </select>
+              </div>
               <button
                 type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  resetForm();
-                }}
-                className="text-sm font-semibold px-5 py-2.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition"
+                onClick={handleAddNewCustomer}
+                className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 pb-2.5"
               >
-                Cancel
+                <UserPlus size={15} /> New Customer
               </button>
-            )}
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Quotation No.</label>
+                <input value={editingHeader?.quotationNo || "Auto-generated on save"} disabled className={`${inputClass} bg-slate-50 text-slate-400`} />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-600 mb-1">Quotation Date</label>
+                {/* Server-assigned at save time, as it always has been -- shown read-only rather than
+                    made editable, since letting the operator pick it would be a behaviour change. */}
+                <input value={new Date(editingHeader?.quotationDate ?? Date.now()).toLocaleDateString("en-IN")} disabled className={`${inputClass} bg-slate-50 text-slate-400`} />
+              </div>
+            </div>
+          </Section>
+
+          {/* ---------- 2. Add Item ---------- */}
+          <Section title="2. Add Item">
+            <QuotationItemEntry
+              lines={lines}
+              onChange={setLines}
+              products={products}
+              onAddNewProduct={handleAddNewProduct}
+              initialItem={restoredItem}
+              initialEditingKey={restoredEditingKey}
+              pendingProductId={pendingProductId}
+              onPendingProductConsumed={() => setPendingProductId(null)}
+              docRates={{ holeRate, bHoleRate, cutoutRate, bCutoutRate }}
+              onDocRateChange={(field, value) => {
+                if (field === "holeRate") setHoleRate(value);
+                else if (field === "bHoleRate") setBHoleRate(value);
+                else if (field === "cutoutRate") setCutoutRate(value);
+                else setBCutoutRate(value);
+              }}
+            />
+          </Section>
+
+          <div className="grid lg:grid-cols-3 gap-5 items-start">
+            {/* ---------- 3. Charges & Discount ---------- */}
+            <Section title="3. Charges & Discount">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Discount Type</label>
+                  <select value={discountType} onChange={(e) => setDiscountType(e.target.value as QuotationDiscountType)} className={inputClass}>
+                    <option value="Percent">%</option>
+                    <option value="Amount">₹</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Discount Value</label>
+                  <input type="number" min={0} max={discountType === "Percent" ? 100 : undefined} step="0.01" value={discountValue || ""} onChange={(e) => setDiscountValue(Number(e.target.value))} className={inputClass} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Discount Amount</label>
+                  <input disabled value={money(discountAmount)} className={`${inputClass} bg-slate-100 text-slate-500`} />
+                </div>
+                <label className="flex items-center gap-1.5 text-sm text-slate-600 self-end pb-2.5">
+                  <input type="checkbox" checked={roundOffEnabled} onChange={(e) => setRoundOffEnabled(e.target.checked)} className="rounded border-slate-300" />
+                  Round Off
+                </label>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Other Charges (+)</label>
+                  <input type="number" min={0} step="0.01" value={otherChargesAmount || ""} onChange={(e) => setOtherChargesAmount(Number(e.target.value))} className={inputClass} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Tax (%)</label>
+                  <input type="number" min={0} max={100} step="0.01" value={taxPct || ""} onChange={(e) => setTaxPct(Number(e.target.value))} className={inputClass} />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Tax Amount</label>
+                  <input disabled value={money(taxAmount)} className={`${inputClass} bg-slate-100 text-slate-500`} />
+                </div>
+              </div>
+            </Section>
+
+            {/* ---------- 4. Terms & Notes ---------- */}
+            <Section title="4. Terms & Notes">
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Terms & Conditions</label>
+                  <textarea rows={3} value={termsConditions} onChange={(e) => setTermsConditions(e.target.value)} placeholder="Enter terms and conditions…" className={`${inputClass} resize-y`} />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1">Notes</label>
+                  <textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Enter any additional notes…" className={`${inputClass} resize-y`} />
+                </div>
+              </div>
+            </Section>
+
+            {/* ---------- 5. Summary ---------- */}
+            <Section title="5. Summary">
+              <div className="space-y-1.5 text-sm">
+                <SummaryRow label="Basic Amount" value={money(subtotal)} />
+                <SummaryRow label="Discount Amount" value={`− ${money(discountAmount)}`} />
+                <SummaryRow label="Other Charges" value={money(otherChargesAmount)} />
+                <SummaryRow label="Tax Amount" value={money(taxAmount)} />
+                {roundOffEnabled && Math.abs(grandTotal - grandTotalRaw) > 0.001 && (
+                  <SummaryRow label="Round Off" value={`${grandTotal - grandTotalRaw >= 0 ? "+" : "−"} ${money(Math.abs(grandTotal - grandTotalRaw))}`} />
+                )}
+                <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200">
+                  <span className="text-base font-bold text-brand-900">Grand Total</span>
+                  <span className="text-base font-bold text-brand-900">{money(grandTotal)}</span>
+                </div>
+              </div>
+            </Section>
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowForm(false);
+                resetForm();
+              }}
+              className="text-sm font-semibold px-5 py-2.5 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 transition"
+            >
+              Cancel
+            </button>
             <button
               type="submit"
               disabled={saving || updating}
@@ -612,6 +711,27 @@ export default function QuotationsPage() {
           onPageChange={setPage}
         />
       </div>
+    </div>
+  );
+}
+
+function Section({ title, extra, children }: { title: string; extra?: string; children: React.ReactNode }) {
+  return (
+    <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-bold text-brand-800">{title}</h2>
+        {extra && <span className="text-xs text-slate-400">{extra}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function SummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between text-slate-600">
+      <span>{label}</span>
+      <span className="font-medium text-slate-800">{value}</span>
     </div>
   );
 }

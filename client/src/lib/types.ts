@@ -562,14 +562,21 @@ export interface QuotationLineDto {
   /** Item-wise, all optional (default 0). Summed across every line and priced at the document's
    * own hole/cutout rates — see QuotationDto.holeRate etc. — not per line. */
   holeQty: number; bHoleQty: number; cutoutQty: number; bCutoutQty: number
+  /** Flat per-item charges (Quotation Entry redesign's "Other Charges" panel) -- added straight
+   * into this line's own Basic/Final Amount. All default 0. */
+  hardwareAmount?: number; transportAmount?: number; otherChargesAmount?: number
+  /** Free-text "Selection" field on the Cutting tab -- purely descriptive, no calculation role. */
+  selection?: string | null
 
   // Server-calculated (see server/Data/QuotationCalculator.cs) — never sent by the client.
   thicknessMm?: number | null
+  /** Read-only, joined from the product's own Category/Sub-Category/Type link — GET /quotations/{id} only. */
+  categoryName?: string | null; subCategoryName?: string | null; typeName?: string | null
   lengthInch: number; widthInch: number
   chargeLengthInch: number; chargeWidthInch: number
   calculatedArea: number; area: number; areaUnit: string
   effectiveRate: number
-  calculatedBasicAmount: number; basicAmount: number
+  calculatedBasicAmount: number; glassAmount?: number; basicAmount: number
   discountAmount: number; taxableAmount: number
   gstAmount: number; amount: number
   calculationMethod: CalculationMethod
@@ -602,6 +609,15 @@ export interface QuotationDto {
   /** = totalHoleQty*holeRate + totalBHoleQty*bHoleRate + totalCutoutQty*cutoutRate + totalBCutoutQty*bCutoutRate,
    * folded into totalValue (added to the basic amount before rounding), same as GET returns it. */
   holesCutoutAmount?: number
+  /** Free text shown on the printed quotation (Quotation Entry redesign's "Terms & Notes" panel). */
+  termsConditions?: string | null; notes?: string | null
+  /** Flat document-level charge, distinct from each line's own Hardware/Transport/Other Charges.
+   * Added into Grand Total after Discount, before Tax. */
+  otherChargesAmount?: number
+  /** Quotation-specific document-level tax, deliberately separate from the per-line gstPct/
+   * gstAmount (Quotations still carry no GST). Computed against the subtotal after Discount and
+   * otherChargesAmount. Both default 0. */
+  taxPct?: number; taxAmount?: number
   lines: QuotationLineDto[]
 }
 export interface NewCustomerRequest {
@@ -624,6 +640,8 @@ export interface CreateQuotationLine {
   manualArea?: number | null
   manualBasicAmount?: number | null
   holeQty: number; bHoleQty: number; cutoutQty: number; bCutoutQty: number
+  hardwareAmount?: number; transportAmount?: number; otherChargesAmount?: number
+  selection?: string | null
 }
 export interface CreateQuotationRequest {
   /** 0 when creating the customer inline via newCustomer. */
@@ -639,6 +657,9 @@ export interface CreateQuotationRequest {
   /** Document-level discount -- see QuotationDto.discountType. Defaults to 'Percent'/0 server-side
    * if omitted. */
   discountType?: QuotationDiscountType; discountValue?: number
+  /** See QuotationDto's own doc comments -- all optional, all default to "no effect" (blank/0). */
+  termsConditions?: string; notes?: string
+  otherChargesAmount?: number; taxPct?: number
   lines: CreateQuotationLine[]
 }
 /** PUT /quotations/{id}. No inline new-customer here — an edit targets an existing quotation. */
@@ -649,6 +670,8 @@ export interface UpdateQuotationRequest {
   holeRate?: number; bHoleRate?: number; cutoutRate?: number; bCutoutRate?: number
   roundOffEnabled?: boolean
   discountType?: QuotationDiscountType; discountValue?: number
+  termsConditions?: string; notes?: string
+  otherChargesAmount?: number; taxPct?: number
   lines: CreateQuotationLine[]
 }
 
