@@ -81,11 +81,13 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                      q.QuotationDate, q.ValidUntil, q.Status, q.Description, q.TotalValue, q.RoundOff, q.RoundOffEnabled,
                      q.DiscountType, q.DiscountValue, q.DiscountAmount,
                      q.HoleRate, q.BHoleRate, q.CutoutRate, q.BCutoutRate,
+                     q.TermsConditions, q.Notes, q.OtherChargesAmount, q.TaxPct, q.TaxAmount,
                      CAST(CASE WHEN NOT EXISTS (SELECT 1 FROM Sales.SalesOrder o WHERE o.QuotationId = q.QuotationId) THEN 1 ELSE 0 END AS BIT) AS CanDelete
               FROM Sales.Quotation q JOIN Master.Customer c ON c.CustomerId = q.CustomerId WHERE q.QuotationId = @id", new { id });
         if (q is null) return NotFound();
         q.Lines = conn.Query<QuotationLineDto>(
             @"SELECT l.ProductId, p.Code AS ProductCode, p.Description AS ProductDescription, l.Description,
+                     cat.Name AS CategoryName, sub.Name AS SubCategoryName, typ.Name AS TypeName,
                      l.Length, l.Width, l.DimensionUnit, l.Qty, l.Rate, l.RateUnit,
                      l.ApplyThickness, l.ChargeRoundingInch, l.GstPct, l.DiscountPct,
                      l.ManualArea, l.ManualBasicAmount,
@@ -96,9 +98,13 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                      l.CalculatedBasicAmount, l.ChargeableAmount AS BasicAmount,
                      l.DiscountAmount, l.TaxableAmount, l.GstAmount, l.Amount,
                      l.CalculationMethod, l.IsAreaManualOverride, l.IsAmountManualOverride,
-                     l.HoleQty, l.BHoleQty, l.CutoutQty, l.BCutoutQty
+                     l.HoleQty, l.BHoleQty, l.CutoutQty, l.BCutoutQty,
+                     l.HardwareAmount, l.TransportAmount, l.OtherChargesAmount, l.Selection
               FROM Sales.QuotationLine l
               LEFT JOIN Master.Product p ON p.ProductId = l.ProductId
+              LEFT JOIN Master.Category cat ON cat.CategoryId = p.CategoryId
+              LEFT JOIN Master.SubCategory sub ON sub.SubCategoryId = p.SubCategoryId
+              LEFT JOIN Master.Type typ ON typ.TypeId = p.TypeId
               WHERE l.QuotationId = @id", new { id }).ToList();
 
         q.TotalHoleQty = q.Lines.Sum(l => l.HoleQty);
@@ -143,6 +149,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         if (holesCutoutProblem is not null) return Invalid("Holes / Cutout", holesCutoutProblem);
         var discountTypeProblem = ValidateDiscountShape(req.DiscountType, req.DiscountValue);
         if (discountTypeProblem is not null) return Invalid("Discount", discountTypeProblem);
+        if (req.TaxPct < 0 || req.TaxPct > 100) return Invalid("Tax", "Tax % must be between 0 and 100.");
+        if (req.OtherChargesAmount < 0) return Invalid("Other Charges", "Other Charges cannot be negative.");
 
         // Quotations don't carry GST -- enforced here, not just hidden client-side, so a direct
         // API call can't smuggle a nonzero rate in. Discount is document-level too -- every line's
@@ -196,9 +204,9 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
 
             decimal total = 0;
             var id = conn.ExecuteScalar<int>(
-                @"INSERT INTO Sales.Quotation (QuotationNo, CustomerId, BranchId, ValidUntil, Status, Description, TotalValue, HoleRate, BHoleRate, CutoutRate, BCutoutRate, RoundOffEnabled, DiscountType, DiscountValue)
-                  OUTPUT INSERTED.QuotationId VALUES (@qNo, @customerId, @branchId, @ValidUntil, 'Sent', @Description, 0, @HoleRate, @BHoleRate, @CutoutRate, @BCutoutRate, @RoundOffEnabled, @DiscountType, @DiscountValue)",
-                new { qNo, customerId, branchId, req.ValidUntil, req.Description, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate, req.RoundOffEnabled, req.DiscountType, req.DiscountValue }, tx);
+                @"INSERT INTO Sales.Quotation (QuotationNo, CustomerId, BranchId, ValidUntil, Status, Description, TotalValue, HoleRate, BHoleRate, CutoutRate, BCutoutRate, RoundOffEnabled, DiscountType, DiscountValue, TermsConditions, Notes, OtherChargesAmount, TaxPct)
+                  OUTPUT INSERTED.QuotationId VALUES (@qNo, @customerId, @branchId, @ValidUntil, 'Sent', @Description, 0, @HoleRate, @BHoleRate, @CutoutRate, @BCutoutRate, @RoundOffEnabled, @DiscountType, @DiscountValue, @TermsConditions, @Notes, @OtherChargesAmount, @TaxPct)",
+                new { qNo, customerId, branchId, req.ValidUntil, req.Description, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate, req.RoundOffEnabled, req.DiscountType, req.DiscountValue, req.TermsConditions, req.Notes, req.OtherChargesAmount, req.TaxPct }, tx);
 
             var thicknessByProduct = ThicknessByProduct(conn, tx, req.Lines);
             foreach (var l in req.Lines)
@@ -219,12 +227,22 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             }
             decimal afterDiscount = total - discountAmount;
 
+            // Other Charges (+) is a flat document-level charge, added after Discount -- distinct
+            // from each line's own Hardware/Transport/Other Charges (already folded into `total`
+            // via InsertLine above). Tax is computed against the subtotal after both Discount and
+            // Other Charges, mirroring how document-level Discount itself is resolved -- a
+            // Quotation-specific figure, deliberately separate from the per-line GstPct/GstAmount
+            // columns (forced to 0 above; Quotations still carry no GST).
+            decimal afterOtherCharges = afterDiscount + req.OtherChargesAmount;
+            decimal taxAmount = Math.Round(afterOtherCharges * req.TaxPct / 100m, 2);
+            decimal afterTax = afterOtherCharges + taxAmount;
+
             // Rounded to the nearest whole rupee only while the operator's Round Off checkbox is
             // on (same convention Invoice always applies); the delta is kept in RoundOff so the
             // printed total reconciles with the lines either way.
-            decimal rounded = req.RoundOffEnabled ? Math.Round(afterDiscount, 0, MidpointRounding.AwayFromZero) : Math.Round(afterDiscount, 2, MidpointRounding.AwayFromZero);
-            decimal roundOff = rounded - afterDiscount;
-            conn.Execute("UPDATE Sales.Quotation SET TotalValue = @rounded, RoundOff = @roundOff, DiscountAmount = @discountAmount WHERE QuotationId = @id", new { rounded, roundOff, discountAmount, id }, tx);
+            decimal rounded = req.RoundOffEnabled ? Math.Round(afterTax, 0, MidpointRounding.AwayFromZero) : Math.Round(afterTax, 2, MidpointRounding.AwayFromZero);
+            decimal roundOff = rounded - afterTax;
+            conn.Execute("UPDATE Sales.Quotation SET TotalValue = @rounded, RoundOff = @roundOff, DiscountAmount = @discountAmount, TaxAmount = @taxAmount WHERE QuotationId = @id", new { rounded, roundOff, discountAmount, taxAmount, id }, tx);
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Create', 'Quotation', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
             return Created($"/api/v1/quotations/{id}", new { quotationId = id, quotationNo = qNo, customerId });
@@ -248,6 +266,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
         if (holesCutoutProblem is not null) return Invalid("Holes / Cutout", holesCutoutProblem);
         var discountTypeProblem = ValidateDiscountShape(req.DiscountType, req.DiscountValue);
         if (discountTypeProblem is not null) return Invalid("Discount", discountTypeProblem);
+        if (req.TaxPct < 0 || req.TaxPct > 100) return Invalid("Tax", "Tax % must be between 0 and 100.");
+        if (req.OtherChargesAmount < 0) return Invalid("Other Charges", "Other Charges cannot be negative.");
         foreach (var l in req.Lines) { l.GstPct = 0; l.DiscountPct = 0; }
 
         for (int i = 0; i < req.Lines.Count; i++)
@@ -288,15 +308,19 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                 return Invalid("Discount", $"The discount ({discountAmount:0.##}) cannot exceed the quotation's basic amount ({total:0.##}).");
             }
             decimal afterDiscount = total - discountAmount;
+            decimal afterOtherCharges = afterDiscount + req.OtherChargesAmount;
+            decimal taxAmount = Math.Round(afterOtherCharges * req.TaxPct / 100m, 2);
+            decimal afterTax = afterOtherCharges + taxAmount;
 
-            decimal rounded = req.RoundOffEnabled ? Math.Round(afterDiscount, 0, MidpointRounding.AwayFromZero) : Math.Round(afterDiscount, 2, MidpointRounding.AwayFromZero);
-            decimal roundOff = rounded - afterDiscount;
+            decimal rounded = req.RoundOffEnabled ? Math.Round(afterTax, 0, MidpointRounding.AwayFromZero) : Math.Round(afterTax, 2, MidpointRounding.AwayFromZero);
+            decimal roundOff = rounded - afterTax;
             conn.Execute(
                 @"UPDATE Sales.Quotation SET CustomerId = @CustomerId, ValidUntil = @ValidUntil, Description = @Description, TotalValue = @rounded, RoundOff = @roundOff,
                          HoleRate = @HoleRate, BHoleRate = @BHoleRate, CutoutRate = @CutoutRate, BCutoutRate = @BCutoutRate, RoundOffEnabled = @RoundOffEnabled,
-                         DiscountType = @DiscountType, DiscountValue = @DiscountValue, DiscountAmount = @discountAmount
+                         DiscountType = @DiscountType, DiscountValue = @DiscountValue, DiscountAmount = @discountAmount,
+                         TermsConditions = @TermsConditions, Notes = @Notes, OtherChargesAmount = @OtherChargesAmount, TaxPct = @TaxPct, TaxAmount = @taxAmount
                   WHERE QuotationId = @id",
-                new { req.CustomerId, req.ValidUntil, req.Description, rounded, roundOff, id, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate, req.RoundOffEnabled, req.DiscountType, req.DiscountValue, discountAmount }, tx);
+                new { req.CustomerId, req.ValidUntil, req.Description, rounded, roundOff, id, req.HoleRate, req.BHoleRate, req.CutoutRate, req.BCutoutRate, req.RoundOffEnabled, req.DiscountType, req.DiscountValue, discountAmount, req.TermsConditions, req.Notes, req.OtherChargesAmount, req.TaxPct, taxAmount }, tx);
             conn.Execute("INSERT INTO Security.AuditLog (Action, Entity, EntityId) VALUES ('Update', 'Quotation', @id)", new { id = id.ToString() }, tx);
             tx.Commit();
             return Ok(new { quotationId = id });
@@ -394,6 +418,9 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
             DiscountPct = l.DiscountPct,
             ManualArea = l.ManualArea,
             ManualBasicAmount = l.ManualBasicAmount,
+            HardwareAmount = l.HardwareAmount,
+            TransportAmount = l.TransportAmount,
+            OtherChargesAmount = l.OtherChargesAmount,
         });
 
         var metadata = System.Text.Json.JsonSerializer.Serialize(new
@@ -418,7 +445,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                  DiscountPct, DiscountAmount, TaxableAmount, GstPct, GstAmount, Amount,
                  ManualArea, ManualBasicAmount, IsAreaManualOverride, IsAmountManualOverride,
                  CalculationMethod, CalculationMetadata,
-                 HoleQty, BHoleQty, CutoutQty, BCutoutQty)
+                 HoleQty, BHoleQty, CutoutQty, BCutoutQty,
+                 HardwareAmount, TransportAmount, OtherChargesAmount, Selection)
               VALUES
                 (@quotationId, @ProductId, @Description, @Qty, @Rate,
                  @Length, @Width, @DimensionUnit, @RateUnit, @ApplyThickness, @ChargeRoundingInch,
@@ -431,7 +459,8 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                  @DiscountPct, @DiscountAmount, @TaxableAmount, @GstPct, @GstAmount, @FinalAmount,
                  @ManualArea, @ManualBasicAmount, @IsAreaManualOverride, @IsAmountManualOverride,
                  @CalculationMethod, @metadata,
-                 @HoleQty, @BHoleQty, @CutoutQty, @BCutoutQty)",
+                 @HoleQty, @BHoleQty, @CutoutQty, @BCutoutQty,
+                 @HardwareAmount, @TransportAmount, @OtherChargesAmount, @Selection)",
             new
             {
                 quotationId,
@@ -479,6 +508,10 @@ public class QuotationsController(IDbConnectionFactory db) : ControllerBase
                 l.BHoleQty,
                 l.CutoutQty,
                 l.BCutoutQty,
+                l.HardwareAmount,
+                l.TransportAmount,
+                l.OtherChargesAmount,
+                l.Selection,
             }, tx);
 
         return calc.FinalAmount;

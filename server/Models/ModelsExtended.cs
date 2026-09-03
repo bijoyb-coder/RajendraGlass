@@ -613,6 +613,14 @@ public class QuotationLineDto
     public int? ProductId { get; set; }
     public string? ProductCode { get; set; }
     public string? ProductDescription { get; set; }
+    /// <summary>Read-only, joined from the product's own Category/Sub-Category/Type link (Master.
+    /// Product.CategoryId/SubCategoryId/TypeId) for the Added Items grid -- QuotationLine itself
+    /// has no Category/Sub-Category/Type columns of its own; the product is the one source of
+    /// truth for what it belongs to, exactly like Product Master's own list. Populated only by
+    /// Get(id), same as ProductCode/ProductDescription above.</summary>
+    public string? CategoryName { get; set; }
+    public string? SubCategoryName { get; set; }
+    public string? TypeName { get; set; }
     /// <summary>Free text, used when there is no product or to override its wording.</summary>
     public string? Description { get; set; }
 
@@ -650,6 +658,15 @@ public class QuotationLineDto
     public decimal BHoleQty { get; set; }
     public decimal CutoutQty { get; set; }
     public decimal BCutoutQty { get; set; }
+    /// <summary>Flat per-item charges (Quotation Entry redesign's "Other Charges" panel), added
+    /// straight into this line's own Basic/Final Amount -- see QuotationCalculator.Calculate.
+    /// All default 0, so a line that never sets them behaves exactly as before.</summary>
+    public decimal HardwareAmount { get; set; }
+    public decimal TransportAmount { get; set; }
+    public decimal OtherChargesAmount { get; set; }
+    /// <summary>Free-text "Selection" field on the Cutting tab -- purely descriptive, no
+    /// calculation role.</summary>
+    public string? Selection { get; set; }
 
     // ----- server-calculated -----
     public decimal LengthInch { get; set; }
@@ -661,6 +678,7 @@ public class QuotationLineDto
     public string AreaUnit { get; set; } = "";
     public decimal EffectiveRate { get; set; }
     public decimal CalculatedBasicAmount { get; set; }
+    public decimal GlassAmount { get; set; }
     public decimal BasicAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal TaxableAmount { get; set; }
@@ -722,6 +740,21 @@ public class QuotationDto
     /// TotalBCutoutQty*BCutoutRate -- folded into TotalValue (added to the basic amount before
     /// rounding) at save time, same figure this property reports back.</summary>
     public decimal HolesCutoutAmount { get; set; }
+    /// <summary>Free text shown on the printed quotation (Quotation Entry redesign's "Terms &amp;
+    /// Notes" panel) -- purely descriptive, no calculation role.</summary>
+    public string? TermsConditions { get; set; }
+    public string? Notes { get; set; }
+    /// <summary>Flat document-level charge (the redesign's "Other Charges (+)" in the Charges &amp;
+    /// Discount panel) -- distinct from each line's own Hardware/Transport/Other Charges. Added
+    /// into Grand Total after Discount, before Tax.</summary>
+    public decimal OtherChargesAmount { get; set; }
+    /// <summary>A Quotation-specific document-level tax, deliberately separate from the per-line
+    /// GstPct/GstAmount (which stay forced to 0 for every Quotation line -- Quotations still don't
+    /// carry GST). Computed against the subtotal after Discount and OtherChargesAmount, the same
+    /// way document-level Discount already is. Both default 0, so an existing quotation with no
+    /// tax entered behaves exactly as before.</summary>
+    public decimal TaxPct { get; set; }
+    public decimal TaxAmount { get; set; }
     public List<QuotationLineDto> Lines { get; set; } = new();
 }
 
@@ -744,6 +777,12 @@ public class CreateQuotationRequest
     /// <summary>"Percent" or "Amount" -- see QuotationDto.DiscountType.</summary>
     public string DiscountType { get; set; } = "Percent";
     public decimal DiscountValue { get; set; }
+    /// <summary>See QuotationDto.TermsConditions/Notes/OtherChargesAmount/TaxPct's own doc
+    /// comments -- all optional, all default to "no effect" (blank/0).</summary>
+    public string? TermsConditions { get; set; }
+    public string? Notes { get; set; }
+    public decimal OtherChargesAmount { get; set; }
+    public decimal TaxPct { get; set; }
     public List<QuotationLineDto> Lines { get; set; } = new();
 }
 
@@ -763,6 +802,10 @@ public class UpdateQuotationRequest
     public bool RoundOffEnabled { get; set; } = true;
     public string DiscountType { get; set; } = "Percent";
     public decimal DiscountValue { get; set; }
+    public string? TermsConditions { get; set; }
+    public string? Notes { get; set; }
+    public decimal OtherChargesAmount { get; set; }
+    public decimal TaxPct { get; set; }
     public List<QuotationLineDto> Lines { get; set; } = new();
 }
 
