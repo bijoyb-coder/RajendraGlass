@@ -255,7 +255,11 @@ export default function QuotationItemEntry({ lines, onChange, products, onAddNew
               item.itemType === t ? "border-brand-600 text-brand-700" : "border-transparent text-slate-400 hover:text-slate-600"
             }`}
           >
-            {t === "CUTTING" ? "Cutting" : "Toughened"}
+            {/* Display labels only -- per the user's rename request the CUTTING tab now reads
+                "Sheet" and the TOUGHENED tab reads "Cutting". The underlying itemType values
+                ("CUTTING"/"TOUGHENED") are unchanged so PRESETS/calcLine/isComplete etc. keep
+                working exactly as before. */}
+            {t === "CUTTING" ? "Sheet" : "Cutting"}
           </button>
         ))}
       </div>
