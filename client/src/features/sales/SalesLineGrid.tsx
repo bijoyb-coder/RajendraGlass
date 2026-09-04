@@ -763,6 +763,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                               manualChargeHeightInch: e.target.value === "" ? null : Number(e.target.value),
                             })
                           }
+                          onFocus={(e) => e.target.select()}
                           className={l.manualChargeHeightInch != null ? overriddenInput : cellInput}
                         />
                         {l.manualChargeHeightInch != null && (
@@ -793,6 +794,7 @@ export default function SalesLineGrid({ lines, products, onChange, holesCutout, 
                               manualChargeWidthInch: e.target.value === "" ? null : Number(e.target.value),
                             })
                           }
+                          onFocus={(e) => e.target.select()}
                           className={l.manualChargeWidthInch != null ? overriddenInput : cellInput}
                         />
                         {l.manualChargeWidthInch != null && (

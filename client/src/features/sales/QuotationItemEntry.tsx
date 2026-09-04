@@ -361,6 +361,7 @@ export default function QuotationItemEntry({ lines, onChange, products, onAddNew
                 type="number" min={0} step="0.01"
                 value={item.manualChargeHeightInch ?? Number(c.chargeLengthInch.toFixed(2))}
                 onChange={(e) => set("manualChargeHeightInch", e.target.value === "" ? null : Number(e.target.value))}
+                onFocus={(e) => e.target.select()}
                 className={item.manualChargeHeightInch != null ? overriddenClass : inputClass}
               />
               {item.manualChargeHeightInch != null && (
@@ -374,6 +375,7 @@ export default function QuotationItemEntry({ lines, onChange, products, onAddNew
                 type="number" min={0} step="0.01"
                 value={item.manualChargeWidthInch ?? Number(c.chargeWidthInch.toFixed(2))}
                 onChange={(e) => set("manualChargeWidthInch", e.target.value === "" ? null : Number(e.target.value))}
+                onFocus={(e) => e.target.select()}
                 className={item.manualChargeWidthInch != null ? overriddenClass : inputClass}
               />
               {item.manualChargeWidthInch != null && (
