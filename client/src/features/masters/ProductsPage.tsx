@@ -37,10 +37,34 @@ type SortKey = 'code' | 'description' | 'thicknessMm' | 'colour' | 'sellingRate'
 export default function ProductsPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  // Only set when we arrived here via Quotation Entry's "+ Add New Product…" -- a direct visit
-  // from the main menu never carries this, so it never redirects back (see handleSubmit below).
-  const returnState = location.state as { returnTo?: string; targetLineKey?: string; draft?: unknown } | null
-  const returningToQuotation = returnState?.returnTo === 'quotation'
+  // Only set when we arrived here via a "+ Add New Product…" trip from Quotation Entry, Sales
+  // Order or Sales Invoice -- a direct visit from the main menu never carries this, so it never
+  // redirects back (see handleSubmit/handleCancel below). Product Master's own behaviour when
+  // visited normally is completely unchanged.
+  type ReturnTo = 'quotation' | 'salesOrder' | 'salesInvoice'
+  const RETURN_ROUTES: Record<ReturnTo, string> = {
+    quotation: '/sales/quotations',
+    salesOrder: '/sales/orders',
+    salesInvoice: '/sales/invoices/new',
+  }
+  const RETURN_LABELS: Record<ReturnTo, string> = {
+    quotation: 'quotation',
+    salesOrder: 'sales order',
+    salesInvoice: 'sales invoice',
+  }
+  const returnState = location.state as { returnTo?: ReturnTo; targetLineKey?: string; draft?: unknown } | null
+  const returnRoute = returnState?.returnTo ? RETURN_ROUTES[returnState.returnTo] : null
+  const returningToQuotation = !!returnRoute
+
+  /** Cancel while on a round trip: go back to the caller with its draft restored exactly as it
+   * was, but no product selected -- distinct from Save, which also carries the new product id. */
+  function handleCancel() {
+    if (returnRoute) {
+      navigate(returnRoute, { state: { restoreDraft: returnState!.draft, targetLineKey: returnState!.targetLineKey } })
+    } else {
+      closeForm()
+    }
+  }
 
   const { data, isLoading } = useListProductsQuery()
   const { data: categories } = useListCategoriesQuery()
@@ -206,10 +230,10 @@ export default function ProductsPage() {
         setForm(emptyForm)
         setOpeningBalanceGodownId('')
         closeForm()
-        // Only the "+ Add New Product…" trip from Quotation Entry carries this -- a product
-        // created from the main menu just stays here, as it always has.
-        if (returningToQuotation) {
-          navigate('/sales/quotations', {
+        // Only a "+ Add New Product…" round trip carries this -- a product created from the main
+        // menu just stays here, as it always has.
+        if (returnRoute) {
+          navigate(returnRoute, {
             state: { restoreDraft: returnState!.draft, targetLineKey: returnState!.targetLineKey, newProductId: result.productId },
           })
         }
@@ -227,7 +251,7 @@ export default function ProductsPage() {
       {returningToQuotation && (
         <div className="flex items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-4 py-2.5 text-sm text-brand-800">
           <ArrowLeftCircle size={16} />
-          Save this product to return to your quotation with it selected.
+          Save this product to return to your {RETURN_LABELS[returnState!.returnTo!]} with it selected, or cancel to go back without one.
         </div>
       )}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -235,7 +259,7 @@ export default function ProductsPage() {
           <h1 className="text-2xl font-bold text-brand-900">Products</h1>
           <p className="text-sm text-slate-500 mt-1">Glass SKUs — thickness, colour, brand, pricing.</p>
         </div>
-        <button onClick={showForm ? closeForm : openNew} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
+        <button onClick={showForm ? handleCancel : openNew} className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-4 py-2.5 rounded-lg shadow transition shrink-0">
           {showForm ? <X size={16} /> : <Plus size={16} />} {showForm ? 'Cancel' : 'New Product'}
         </button>
       </div>
