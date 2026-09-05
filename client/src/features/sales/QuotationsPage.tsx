@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
   Plus,
@@ -24,7 +24,7 @@ import {
 } from "../masters/mastersApi";
 import { calcLine, isComplete, toCreateLine, fromSavedLine } from "./SalesLineGrid";
 import type { SalesLine } from "./SalesLineGrid";
-import QuotationItemEntry from "./QuotationItemEntry";
+import QuotationItemEntry, { type QuotationItemEntryHandle } from "./QuotationItemEntry";
 import { alertError, confirmAction } from "../../lib/alerts";
 import {
   useDataGrid,
@@ -133,6 +133,11 @@ export default function QuotationsPage() {
   const [taxPct, setTaxPct] = useState(0);
   const [termsConditions, setTermsConditions] = useState("");
   const [notes, setNotes] = useState("");
+  // Drives the "2. Add Item" header button -- the actual Add/Update action still lives inside
+  // QuotationItemEntry (it owns the in-progress item), triggered here via ref per the mockup's
+  // top-right button placement. isEditingItem only controls that button's label.
+  const itemEntryRef = useRef<QuotationItemEntryHandle>(null);
+  const [isEditingItem, setIsEditingItem] = useState(false);
 
   // Restored from a draft when returning from "+ Add New Product…" -- seeds QuotationItemEntry's
   // own in-progress item via its initialItem/initialEditingKey props (see the restore effect
@@ -437,7 +442,7 @@ export default function QuotationsPage() {
       {showForm && (
         <form onSubmit={handleSubmit} className="space-y-5 animate-fade-in">
           {/* ---------- 1. Customer & Quotation Details ---------- */}
-          <Section title="1. Customer & Quotation Details" extra={loadingForEdit ? "Loading…" : undefined}>
+          <Section title="1. Customer & Quotation Details" extra={loadingForEdit ? <span className="text-xs text-slate-400">Loading…</span> : undefined}>
             <div className="flex flex-wrap items-end gap-3 mb-4">
               <div className="w-full max-w-sm">
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Customer *</label>
@@ -471,8 +476,20 @@ export default function QuotationsPage() {
           </Section>
 
           {/* ---------- 2. Add Item ---------- */}
-          <Section title="2. Add Item">
+          <Section
+            title="2. Add Item"
+            extra={
+              <button
+                type="button"
+                onClick={() => itemEntryRef.current?.addItem()}
+                className="inline-flex items-center gap-1.5 bg-brand-600 hover:bg-brand-700 text-white text-xs font-semibold px-4 py-2 rounded-lg shadow transition"
+              >
+                <Plus size={14} /> {isEditingItem ? "Update Item" : "Add Item"}
+              </button>
+            }
+          >
             <QuotationItemEntry
+              ref={itemEntryRef}
               lines={lines}
               onChange={setLines}
               products={products}
@@ -488,6 +505,7 @@ export default function QuotationsPage() {
                 else if (field === "cutoutRate") setCutoutRate(value);
                 else setBCutoutRate(value);
               }}
+              onEditingChange={setIsEditingItem}
             />
           </Section>
 
@@ -715,12 +733,12 @@ export default function QuotationsPage() {
   );
 }
 
-function Section({ title, extra, children }: { title: string; extra?: string; children: React.ReactNode }) {
+function Section({ title, extra, children }: { title: string; extra?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-sm font-bold text-brand-800">{title}</h2>
-        {extra && <span className="text-xs text-slate-400">{extra}</span>}
+        {extra}
       </div>
       {children}
     </div>
