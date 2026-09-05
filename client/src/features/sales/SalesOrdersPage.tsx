@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Plus, X, ClipboardList, Printer, ArrowRightCircle, Receipt } from 'lucide-react'
+import { Plus, X, ClipboardList, Printer, ArrowRightCircle, Receipt, UserPlus } from 'lucide-react'
 import { useListSalesOrdersQuery, useCreateSalesOrderMutation, useDeleteSalesOrderMutation, useLazyGetSalesOrderQuery } from './salesExtraApi'
 import { useCreateInvoiceMutation } from './salesApi'
 import { useListCustomersQuery, useListProductsQuery } from '../masters/mastersApi'
@@ -46,14 +46,15 @@ export default function SalesOrdersPage() {
   const [error, setError] = useState<string | null>(null)
   const [convertError, setConvertError] = useState<string | null>(null)
 
-  // Coming back from Product Master after "+ Add New Product…" -- restore the form exactly as it
-  // was, and drop the new product into whichever line sent us there (Cancel there carries the same
-  // draft back with no newProductId, so the form still restores but nothing extra gets selected).
+  // Coming back from Product Master after "+ Add New Product…", or from Customer Entry after
+  // "New Customer" -- restore the form exactly as it was, and drop the new product/customer into
+  // place (Cancel there carries the same draft back with no newProductId/newCustomerId, so the
+  // form still restores but nothing extra gets selected).
   useEffect(() => {
-    const state = location.state as { restoreDraft?: SalesOrderDraft; targetLineKey?: string; newProductId?: number } | null
+    const state = location.state as { restoreDraft?: SalesOrderDraft; targetLineKey?: string; newProductId?: number; newCustomerId?: number } | null
     if (!state?.restoreDraft) return
     const draft = state.restoreDraft
-    setCustomerId(draft.customerId)
+    setCustomerId(state.newCustomerId ?? draft.customerId)
     let restoredLines = draft.lines
     if (state.newProductId && state.targetLineKey) {
       const product = products?.items.find((p) => p.productId === state.newProductId)
@@ -77,6 +78,13 @@ export default function SalesOrdersPage() {
   function handleAddNewProduct(lineKey: string) {
     const draft: SalesOrderDraft = { customerId, lines }
     navigate('/masters/products', { state: { returnTo: 'salesOrder', targetLineKey: lineKey, draft } })
+  }
+
+  /** "New Customer": same round trip as handleAddNewProduct above, just to Customer Entry and
+   * without a per-line target since a sales order only ever has one customer. */
+  function handleAddNewCustomer() {
+    const draft: SalesOrderDraft = { customerId, lines }
+    navigate('/masters/customers', { state: { returnTo: 'salesOrder', draft } })
   }
 
   // Shared with the Quotations screen so the search/sort behaviour is identical everywhere.
@@ -180,12 +188,21 @@ export default function SalesOrdersPage() {
 
       {showForm && (
         <form onSubmit={handleSubmit} className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 space-y-4 animate-fade-in">
-          <div className="max-w-sm">
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Customer *</label>
-            <select required value={customerId} onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
-              <option value="">Select customer…</option>
-              {customers?.items.map((c) => <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerType ?? 'Retail'})</option>)}
-            </select>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="w-full max-w-sm">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Customer *</label>
+              <select required value={customerId} onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : '')} className={inputClass}>
+                <option value="">Select customer…</option>
+                {customers?.items.map((c) => <option key={c.customerId} value={c.customerId}>{c.name} ({c.customerType ?? 'Retail'})</option>)}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={handleAddNewCustomer}
+              className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 pb-2.5"
+            >
+              <UserPlus size={15} /> New Customer
+            </button>
           </div>
 
           {/* Shared with the Quotation screen so the two can never drift apart. */}
