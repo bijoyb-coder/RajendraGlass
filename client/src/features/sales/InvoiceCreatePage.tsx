@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { Plus, Trash2, Save } from 'lucide-react'
 import { useListCustomersQuery, useListProductsQuery, useListTransportersQuery, useListVehiclesQuery } from '../masters/mastersApi'
 import { useCreateInvoiceMutation } from './salesApi'
@@ -13,7 +13,20 @@ function money(n: number) {
   return new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 }).format(n)
 }
 
+/** What's carried across the "+ Add New Product…" round trip to Product Master and back. */
+interface InvoiceDraft {
+  customerId: number | '';
+  invoiceDate: string;
+  customerOrderRef: string;
+  transporterId: number | '';
+  vehicleNo: string;
+  destination: string;
+  remarks: string;
+  lines: LineRow[];
+}
+
 export default function InvoiceCreatePage() {
+  const location = useLocation()
   const navigate = useNavigate()
   const { data: customers } = useListCustomersQuery()
   const { data: products } = useListProductsQuery()
@@ -48,6 +61,42 @@ export default function InvoiceCreatePage() {
   function onProductChange(key: string, productId: number) {
     const product = products?.items.find((p) => p.productId === productId)
     updateLine(key, { productId, ratePerUnit: product?.sellingRate ?? 0 })
+  }
+
+  // Coming back from Product Master after "+ Add New Product…" -- restore the form exactly as it
+  // was, and drop the new product into whichever line sent us there (Cancel there carries the same
+  // draft back with no newProductId, so the form still restores but nothing extra gets selected).
+  useEffect(() => {
+    const state = location.state as { restoreDraft?: InvoiceDraft; targetLineKey?: string; newProductId?: number } | null
+    if (!state?.restoreDraft) return
+    const draft = state.restoreDraft
+    setCustomerId(draft.customerId)
+    setInvoiceDate(draft.invoiceDate)
+    setCustomerOrderRef(draft.customerOrderRef)
+    setTransporterId(draft.transporterId)
+    setVehicleNo(draft.vehicleNo)
+    setDestination(draft.destination)
+    setRemarks(draft.remarks)
+    let restoredLines = draft.lines
+    if (state.newProductId && state.targetLineKey) {
+      const product = products?.items.find((p) => p.productId === state.newProductId)
+      restoredLines = restoredLines.map((l) =>
+        l.key === state.targetLineKey ? { ...l, productId: state.newProductId!, ratePerUnit: product?.sellingRate ?? l.ratePerUnit } : l,
+      )
+    }
+    setLines(restoredLines)
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products])
+
+  /** "+ Add New Product…" from a line's Product dropdown: stash the in-progress form and go to
+   * Product Master. Saving there returns here with the same data restored and the new product
+   * selected into the line that asked for it; cancelling there returns here with the same data
+   * restored and nothing selected. Navigating to Product Master any other way (the main menu)
+   * never carries this state, so it behaves exactly as it always has. */
+  function handleAddNewProduct(lineKey: string) {
+    const draft: InvoiceDraft = { customerId, invoiceDate, customerOrderRef, transporterId, vehicleNo, destination, remarks, lines }
+    navigate('/masters/products', { state: { returnTo: 'salesInvoice', targetLineKey: lineKey, draft } })
   }
 
   const totals = useMemo(() => {
@@ -156,9 +205,17 @@ export default function InvoiceCreatePage() {
                   return (
                     <tr key={line.key}>
                       <td className="px-4 py-2">
-                        <select value={line.productId || ''} onChange={(e) => onProductChange(line.key, Number(e.target.value))} className={inputClass}>
+                        <select
+                          value={line.productId || ''}
+                          onChange={(e) => {
+                            if (e.target.value === '__new__') { handleAddNewProduct(line.key); return }
+                            onProductChange(line.key, Number(e.target.value))
+                          }}
+                          className={inputClass}
+                        >
                           <option value="">Select product…</option>
                           {products?.items.map((p) => <option key={p.productId} value={p.productId}>{p.code} — {p.description}</option>)}
+                          <option value="__new__">+ Add New Product…</option>
                         </select>
                       </td>
                       <td className="px-4 py-2">

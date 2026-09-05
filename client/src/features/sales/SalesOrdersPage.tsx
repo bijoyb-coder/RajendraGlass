@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Plus, X, ClipboardList, Printer, ArrowRightCircle, Receipt } from 'lucide-react'
 import { useListSalesOrdersQuery, useCreateSalesOrderMutation, useDeleteSalesOrderMutation, useLazyGetSalesOrderQuery } from './salesExtraApi'
 import { useCreateInvoiceMutation } from './salesApi'
@@ -21,7 +21,17 @@ const statusStyles: Record<string, string> = {
 
 type SortKey = 'orderNo' | 'orderDate' | 'customerName' | 'totalValue' | 'status'
 
+/** What's carried across the "+ Add New Product…" round trip to Product Master and back --
+ * mirrors QuotationsPage's own QuotationDraft, one level simpler since Sales Order has no
+ * document-level rates/discount of its own to preserve. */
+interface SalesOrderDraft {
+  customerId: number | '';
+  lines: SalesLine[];
+}
+
 export default function SalesOrdersPage() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { data, isLoading } = useListSalesOrdersQuery()
   const { data: customers } = useListCustomersQuery()
   const { data: products } = useListProductsQuery()
@@ -35,6 +45,39 @@ export default function SalesOrdersPage() {
   const [lines, setLines] = useState<SalesLine[]>([emptyLine()])
   const [error, setError] = useState<string | null>(null)
   const [convertError, setConvertError] = useState<string | null>(null)
+
+  // Coming back from Product Master after "+ Add New Product…" -- restore the form exactly as it
+  // was, and drop the new product into whichever line sent us there (Cancel there carries the same
+  // draft back with no newProductId, so the form still restores but nothing extra gets selected).
+  useEffect(() => {
+    const state = location.state as { restoreDraft?: SalesOrderDraft; targetLineKey?: string; newProductId?: number } | null
+    if (!state?.restoreDraft) return
+    const draft = state.restoreDraft
+    setCustomerId(draft.customerId)
+    let restoredLines = draft.lines
+    if (state.newProductId && state.targetLineKey) {
+      const product = products?.items.find((p) => p.productId === state.newProductId)
+      restoredLines = restoredLines.map((l) =>
+        l.key === state.targetLineKey
+          ? { ...l, productId: state.newProductId!, rate: product?.sellingRate ?? l.rate, thicknessMm: product?.thicknessMm ?? l.thicknessMm }
+          : l,
+      )
+    }
+    setLines(restoredLines)
+    setShowForm(true)
+    navigate(location.pathname, { replace: true, state: null })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [products])
+
+  /** "+ Add New Product…" from a line's Product dropdown: stash the in-progress form and go to
+   * Product Master. Saving there returns here (see the restore effect above) with the same data
+   * restored and the new product selected into the line that asked for it; cancelling there
+   * returns here with the same data restored and nothing selected. Navigating to Product Master
+   * any other way (the main menu) never carries this state, so it behaves exactly as it always has. */
+  function handleAddNewProduct(lineKey: string) {
+    const draft: SalesOrderDraft = { customerId, lines }
+    navigate('/masters/products', { state: { returnTo: 'salesOrder', targetLineKey: lineKey, draft } })
+  }
 
   // Shared with the Quotations screen so the search/sort behaviour is identical everywhere.
   const {
@@ -146,7 +189,7 @@ export default function SalesOrdersPage() {
           </div>
 
           {/* Shared with the Quotation screen so the two can never drift apart. */}
-          <SalesLineGrid lines={lines} products={products} onChange={setLines} />
+          <SalesLineGrid lines={lines} products={products} onChange={setLines} onAddNewProduct={handleAddNewProduct} />
 
           {error && <div className="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5">{error}</div>}
           <div className="flex justify-end">
