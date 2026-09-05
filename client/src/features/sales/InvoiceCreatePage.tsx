@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { Plus, Trash2, Save } from 'lucide-react'
+import { Plus, Trash2, Save, UserPlus } from 'lucide-react'
 import { useListCustomersQuery, useListProductsQuery, useListTransportersQuery, useListVehiclesQuery } from '../masters/mastersApi'
 import { useCreateInvoiceMutation } from './salesApi'
 import type { CreateInvoiceLineRequest } from '../../lib/types'
@@ -63,14 +63,15 @@ export default function InvoiceCreatePage() {
     updateLine(key, { productId, ratePerUnit: product?.sellingRate ?? 0 })
   }
 
-  // Coming back from Product Master after "+ Add New Product…" -- restore the form exactly as it
-  // was, and drop the new product into whichever line sent us there (Cancel there carries the same
-  // draft back with no newProductId, so the form still restores but nothing extra gets selected).
+  // Coming back from Product Master after "+ Add New Product…", or from Customer Entry after
+  // "New Customer" -- restore the form exactly as it was, and drop the new product/customer into
+  // place (Cancel there carries the same draft back with no newProductId/newCustomerId, so the
+  // form still restores but nothing extra gets selected).
   useEffect(() => {
-    const state = location.state as { restoreDraft?: InvoiceDraft; targetLineKey?: string; newProductId?: number } | null
+    const state = location.state as { restoreDraft?: InvoiceDraft; targetLineKey?: string; newProductId?: number; newCustomerId?: number } | null
     if (!state?.restoreDraft) return
     const draft = state.restoreDraft
-    setCustomerId(draft.customerId)
+    setCustomerId(state.newCustomerId ?? draft.customerId)
     setInvoiceDate(draft.invoiceDate)
     setCustomerOrderRef(draft.customerOrderRef)
     setTransporterId(draft.transporterId)
@@ -97,6 +98,13 @@ export default function InvoiceCreatePage() {
   function handleAddNewProduct(lineKey: string) {
     const draft: InvoiceDraft = { customerId, invoiceDate, customerOrderRef, transporterId, vehicleNo, destination, remarks, lines }
     navigate('/masters/products', { state: { returnTo: 'salesInvoice', targetLineKey: lineKey, draft } })
+  }
+
+  /** "New Customer": same round trip as handleAddNewProduct above, just to Customer Entry and
+   * without a per-line target since an invoice only ever has one customer. */
+  function handleAddNewCustomer() {
+    const draft: InvoiceDraft = { customerId, invoiceDate, customerOrderRef, transporterId, vehicleNo, destination, remarks, lines }
+    navigate('/masters/customers', { state: { returnTo: 'salesInvoice', draft } })
   }
 
   const totals = useMemo(() => {
@@ -155,6 +163,13 @@ export default function InvoiceCreatePage() {
               <option value="">Select customer…</option>
               {customers?.items.map((c) => <option key={c.customerId} value={c.customerId}>{c.name}</option>)}
             </select>
+            <button
+              type="button"
+              onClick={handleAddNewCustomer}
+              className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-brand-600 hover:text-brand-700"
+            >
+              <UserPlus size={13} /> New Customer
+            </button>
           </Field>
           <Field label="Invoice Date">
             <input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className={inputClass} />
