@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, RotateCcw, Trash } from "lucide-react";
+import { forwardRef, useEffect, useImperativeHandle, useState } from "react";
+import { Pencil, Trash2, RotateCcw, Trash } from "lucide-react";
 import { emptyLine, isComplete, calcLine, PRESETS, type SalesLine } from "./SalesLineGrid";
 import { DIMENSION_UNITS, RATE_UNITS, RATE_UNIT_LABEL } from "../../lib/quotationCalc";
 import { parseGlassDimension } from "../../lib/glassDimension";
@@ -54,6 +54,9 @@ interface Props {
    * straight back to the parent's state. */
   docRates?: DocRates;
   onDocRateChange?: (field: keyof DocRates, value: number) => void;
+  /** Reports whether an existing item is being edited, so the parent's own header button (see
+   * QuotationsPage's "2. Add Item" section) can show "Update Item" instead of "+ Add Item". */
+  onEditingChange?: (editing: boolean) => void;
 }
 
 export interface DocRates {
@@ -63,9 +66,23 @@ export interface DocRates {
   bCutoutRate: number;
 }
 
-export default function QuotationItemEntry({ lines, onChange, products, onAddNewProduct, initialItem, initialEditingKey, pendingProductId, onPendingProductConsumed, docRates, onDocRateChange }: Props) {
+/** Lets the parent trigger the same Add/Update action from its own header button, positioned per
+ * the mockup's "top right of the Add Item panel" placement rather than inline with the form. */
+export interface QuotationItemEntryHandle {
+  addItem: () => void;
+}
+
+const QuotationItemEntry = forwardRef<QuotationItemEntryHandle, Props>(function QuotationItemEntry(
+  { lines, onChange, products, onAddNewProduct, initialItem, initialEditingKey, pendingProductId, onPendingProductConsumed, docRates, onDocRateChange, onEditingChange },
+  ref
+) {
   const [item, setItem] = useState<SalesLine>(() => initialItem ?? { ...emptyLine("CUT_SQFT"), itemType: "CUTTING" });
   const [editingKey, setEditingKey] = useState<string | null>(initialEditingKey ?? null);
+
+  useEffect(() => {
+    onEditingChange?.(editingKey != null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingKey]);
 
   // Once the newly created product actually shows up in the product list, select it into the
   // in-progress item the same way picking it from the dropdown would.
@@ -142,6 +159,8 @@ export default function QuotationItemEntry({ lines, onChange, products, onAddNew
     }
     resetItem();
   }
+
+  useImperativeHandle(ref, () => ({ addItem: handleAddItem }));
 
   function handleEdit(l: SalesLine) {
     setItem(l);
@@ -454,16 +473,6 @@ export default function QuotationItemEntry({ lines, onChange, products, onAddNew
         <textarea rows={2} placeholder="Enter description / remarks…" value={item.description} onChange={(e) => set("description", e.target.value)} className={`${inputClass} resize-y`} />
       </Field>
 
-      <div className="flex justify-center">
-        <button
-          type="button"
-          onClick={handleAddItem}
-          className="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white text-sm font-semibold px-6 py-2.5 rounded-lg shadow transition"
-        >
-          <Plus size={16} /> {editingKey ? "Update Item" : "Add Item"}
-        </button>
-      </div>
-
       {/* ---------- Added Items ---------- */}
       <div className="overflow-x-auto rounded-lg border border-slate-200">
         <table className="w-full text-sm">
@@ -541,7 +550,9 @@ export default function QuotationItemEntry({ lines, onChange, products, onAddNew
       </div>
     </div>
   );
-}
+});
+
+export default QuotationItemEntry;
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
